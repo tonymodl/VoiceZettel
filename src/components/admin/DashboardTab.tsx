@@ -7,6 +7,7 @@ import {
     Zap, HardDrive, Radio, Bot, BookOpen, Search, ArrowUpDown,
     Mic, ShieldCheck, ShieldAlert, ShieldX,
     Wrench, Key, CreditCard, Clock,
+    Brain, FolderSync, Users, Globe,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────
@@ -90,6 +91,23 @@ interface VoiceHealth {
     checks: VoiceHealthCheck[];
 }
 
+interface OpenClawStatus {
+    status: string;
+    configured: boolean;
+    raw_files: number;
+    wiki_pages: number;
+    processed_files: number;
+    pending_files: number;
+    entities: { people: number; tasks: number };
+    directories: { raw_v2: boolean; wiki_v2: boolean };
+}
+
+interface CrmStats {
+    status: string;
+    initialized: boolean;
+    stats?: { people: number; tasks: number; interactions: number; pending_actions: number };
+}
+
 // ── Helpers ───────────────────────────────────────────────────
 
 const POLL_INTERVAL = 5000;
@@ -169,6 +187,8 @@ export function DashboardTab() {
     const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
     const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
     const [voiceHealth, setVoiceHealth] = useState<VoiceHealth | null>(null);
+    const [openclawStatus, setOpenclawStatus] = useState<OpenClawStatus | null>(null);
+    const [crmStats, setCrmStats] = useState<CrmStats | null>(null);
     const [isHealing, setIsHealing] = useState(false);
     const [healLog, setHealLog] = useState<Array<{ service: string; descRu: string; success: boolean }> | null>(null);
     const [apiCredits, setApiCredits] = useState<Array<{
@@ -331,6 +351,135 @@ export function DashboardTab() {
                 details: "Нет ответа",
                 descRu: "❌ Не удалось проверить статус Live-синхронизации. Telegram-сервис не отвечает.",
                 badge: "RT",
+            });
+        }
+
+        // ── V3.0 Services ─────────────────────────────────────
+
+        // 8) OpenClaw Agent
+        try {
+            const { data, latency } = await fetchWithTimeout("/api/openclaw/status", 4000);
+            const d = data as OpenClawStatus;
+            setOpenclawStatus(d);
+            const configured = d.configured;
+            const hasData = d.raw_files > 0 || d.wiki_pages > 0;
+            results.push({
+                name: "OpenClaw Agent",
+                nameRu: "OpenClaw (Wiki)",
+                icon: <Brain className={`size-4 ${configured ? "text-fuchsia-400" : "text-zinc-500"}`} />,
+                status: configured ? (hasData ? "online" : "degraded") : "degraded",
+                latency,
+                details: configured
+                    ? `Raw: ${d.raw_files} | Wiki: ${d.wiki_pages} | People: ${d.entities.people} | Tasks: ${d.entities.tasks}`
+                    : "Не настроен",
+                descRu: configured
+                    ? hasData
+                        ? `✅ OpenClaw настроен. ${d.raw_files} сырых файлов, ${d.wiki_pages} wiki-страниц. Извлечено: ${d.entities.people} персон, ${d.entities.tasks} задач.`
+                        : "⚠️ OpenClaw настроен, но данных пока нет. Запустите экспорт Telegram или Shadow Mode для наполнения Raw_v2/."
+                    : "⚠️ OpenClaw не настроен. Запустите: bash scripts/setup-openclaw.sh",
+                badge: "LLM",
+            });
+        } catch {
+            setOpenclawStatus(null);
+            results.push({
+                name: "OpenClaw Agent",
+                nameRu: "OpenClaw (Wiki)",
+                icon: <Brain className="size-4 text-zinc-500" />,
+                status: "degraded",
+                latency: null,
+                details: "Не проверяется — ожидает настройки",
+                descRu: "⚠️ Эндпоинт OpenClaw не отвечает. Убедитесь, что конфигурация .openclaw/ существует.",
+                badge: "LLM",
+            });
+        }
+
+        // 9) Shadow Mode (Raw_v2 / Wiki_v2)
+        try {
+            const { data } = await fetchWithTimeout("/api/openclaw/status", 3000);
+            const d = data as OpenClawStatus;
+            const bothExist = d.directories.raw_v2 && d.directories.wiki_v2;
+            results.push({
+                name: "Shadow Mode",
+                nameRu: "Shadow Mode",
+                icon: <FolderSync className={`size-4 ${bothExist ? "text-indigo-400" : "text-amber-400"}`} />,
+                status: bothExist ? "online" : "degraded",
+                latency: null,
+                details: `Raw_v2: ${d.directories.raw_v2 ? "✓" : "✗"} | Wiki_v2: ${d.directories.wiki_v2 ? "✓" : "✗"} | ${d.pending_files} ожидает`,
+                descRu: bothExist
+                    ? `✅ Shadow Mode активен. Директории Raw_v2/ и Wiki_v2/ существуют. ${d.pending_files} файлов ожидают обработки.`
+                    : "⚠️ Директории Shadow Mode не найдены. Создайте: VoiceZettel/Raw_v2/ и VoiceZettel/Wiki_v2/",
+                badge: "v2",
+            });
+        } catch {
+            results.push({
+                name: "Shadow Mode",
+                nameRu: "Shadow Mode",
+                icon: <FolderSync className="size-4 text-red-400" />,
+                status: "offline",
+                latency: null,
+                details: "Не проверяется",
+                descRu: "❌ Не удалось проверить Shadow Mode.",
+                badge: "v2",
+            });
+        }
+
+        // 10) CRM Database (sqlite_v2)
+        try {
+            const { data, latency } = await fetchWithTimeout("/api/crm?view=stats", 4000);
+            const d = data as CrmStats;
+            setCrmStats(d);
+            results.push({
+                name: "CRM Database",
+                nameRu: "CRM (граф знаний)",
+                icon: <Users className={`size-4 ${d.initialized ? "text-teal-400" : "text-zinc-500"}`} />,
+                status: d.initialized ? "online" : "degraded",
+                latency,
+                details: d.initialized && d.stats
+                    ? `People: ${d.stats.people} | Tasks: ${d.stats.tasks} | Events: ${d.stats.interactions} | Actions: ${d.stats.pending_actions}`
+                    : "БД не инициализирована",
+                descRu: d.initialized && d.stats
+                    ? `✅ CRM работает. ${d.stats.people} персон, ${d.stats.tasks} задач, ${d.stats.interactions} взаимодействий. Ожидает действий: ${d.stats.pending_actions}.`
+                    : "⚠️ CRM база данных (sqlite_v2.db) ещё не создана. Она будет создана при первом запуске OpenClaw.",
+                badge: "DB",
+            });
+        } catch {
+            setCrmStats(null);
+            results.push({
+                name: "CRM Database",
+                nameRu: "CRM (граф знаний)",
+                icon: <Users className="size-4 text-zinc-500" />,
+                status: "degraded",
+                latency: null,
+                details: "Ожидает инициализации",
+                descRu: "⚠️ CRM база данных (sqlite_v2.db) ещё не создана. Она будет создана при первом запуске OpenClaw агента.",
+                badge: "DB",
+            });
+        }
+
+        // 11) Google Workspace
+        try {
+            const { latency } = await fetchWithTimeout("/api/workspace/sync", 3000).catch(() => ({ data: null, latency: -1 }));
+            // Workspace sync is POST-only, so a GET will 405 — that's actually fine, it means the route exists
+            results.push({
+                name: "Google Workspace",
+                nameRu: "Google Workspace",
+                icon: <Globe className={`size-4 ${latency > 0 ? "text-blue-400" : "text-zinc-500"}`} />,
+                status: "degraded",
+                latency: null,
+                details: "Ожидает OAuth настройки",
+                descRu: "⚠️ Google Workspace готов к подключению. Настройте OAuth credentials в .env для полной синхронизации документов.",
+                badge: "API",
+            });
+        } catch {
+            results.push({
+                name: "Google Workspace",
+                nameRu: "Google Workspace",
+                icon: <Globe className="size-4 text-zinc-500" />,
+                status: "degraded",
+                latency: null,
+                details: "Не настроен",
+                descRu: "⚠️ Google Workspace ожидает настройки OAuth. Перейдите во вкладку Документы для подключения.",
+                badge: "API",
             });
         }
 
@@ -1008,7 +1157,89 @@ export function DashboardTab() {
                         <span className="text-zinc-600">→</span>
                         <span className="flex items-center gap-1 text-cyan-400"><Bot className="size-3.5" /> Gemini Live</span>
                     </div>
+                    {/* Extended pipeline: Shadow Mode */}
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                        <span className="flex items-center gap-1 text-indigo-400"><FolderSync className="size-3.5" /> Shadow (Raw_v2)</span>
+                        <span className="text-zinc-600">→</span>
+                        <span className="flex items-center gap-1 text-fuchsia-400"><Brain className="size-3.5" /> OpenClaw</span>
+                        <span className="text-zinc-600">→</span>
+                        <span className="flex items-center gap-1 text-teal-400"><Users className="size-3.5" /> CRM (Wiki_v2)</span>
+                    </div>
                 </div>
+            </section>
+
+            {/* ══════════════════════════════════════════
+                PRIORITY 6 — OpenClaw Knowledge Graph
+               ══════════════════════════════════════════ */}
+            <section className="rounded-2xl border border-fuchsia-500/15 bg-zinc-900/60 p-5 backdrop-blur">
+                <div className="mb-4 flex items-center gap-3">
+                    <div className="flex size-9 items-center justify-center rounded-lg bg-fuchsia-500/10">
+                        <Brain className="size-4 text-fuchsia-400" />
+                    </div>
+                    <div>
+                        <h3 className="text-sm font-bold text-zinc-100">Knowledge Graph</h3>
+                        <p className="text-xs text-zinc-500">OpenClaw LLM-Wiki + CRM</p>
+                    </div>
+                </div>
+
+                {openclawStatus ? (
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                            <div className="rounded-xl bg-fuchsia-500/10 px-3 py-2.5 text-center">
+                                <div className="text-[10px] font-medium uppercase text-fuchsia-300/70">Raw файлов</div>
+                                <div className="text-xl font-black text-fuchsia-300">{openclawStatus.raw_files}</div>
+                            </div>
+                            <div className="rounded-xl bg-indigo-500/10 px-3 py-2.5 text-center">
+                                <div className="text-[10px] font-medium uppercase text-indigo-300/70">Wiki страниц</div>
+                                <div className="text-xl font-black text-indigo-300">{openclawStatus.wiki_pages}</div>
+                            </div>
+                            <div className="rounded-xl bg-teal-500/10 px-3 py-2.5 text-center">
+                                <div className="text-[10px] font-medium uppercase text-teal-300/70">Персоны</div>
+                                <div className="text-xl font-black text-teal-300">{openclawStatus.entities.people}</div>
+                            </div>
+                            <div className="rounded-xl bg-amber-500/10 px-3 py-2.5 text-center">
+                                <div className="text-[10px] font-medium uppercase text-amber-300/70">Задачи</div>
+                                <div className="text-xl font-black text-amber-300">{openclawStatus.entities.tasks}</div>
+                            </div>
+                        </div>
+
+                        {openclawStatus.pending_files > 0 && (
+                            <div className="flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-2.5">
+                                <AlertTriangle className="size-4 text-amber-400" />
+                                <span className="text-xs text-amber-300">
+                                    {openclawStatus.pending_files} файлов ожидают обработки OpenClaw
+                                </span>
+                            </div>
+                        )}
+
+                        {/* CRM stats */}
+                        {crmStats?.initialized && crmStats.stats && (
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                {[
+                                    { label: "Взаимодействия", value: crmStats.stats.interactions, icon: "💬" },
+                                    { label: "Health Alerts", value: crmStats.stats.pending_actions, icon: "❤️" },
+                                ].map((s) => (
+                                    <div key={s.label} className="rounded-xl bg-zinc-800/30 px-3 py-2">
+                                        <div className="text-[10px] font-medium uppercase text-zinc-500">{s.icon} {s.label}</div>
+                                        <div className="text-base font-black text-zinc-200">{s.value}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                            <span className="flex items-center gap-1 text-fuchsia-400"><Brain className="size-3.5" /> Ollama + Qwen2.5</span>
+                            <span className="text-zinc-600">→</span>
+                            <span className="flex items-center gap-1 text-indigo-400"><FolderSync className="size-3.5" /> Wiki_v2/</span>
+                            <span className="text-zinc-600">→</span>
+                            <span className="flex items-center gap-1 text-teal-400"><Users className="size-3.5" /> Dunbar CRM</span>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex items-center gap-2 text-sm text-zinc-500">
+                        <Loader2 className="size-4 animate-spin" /> Проверка OpenClaw...
+                    </div>
+                )}
             </section>
         </div>
     );
