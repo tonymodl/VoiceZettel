@@ -624,4 +624,68 @@ graph TB
 
 ---
 
+## 14. 🚀 Performance Audit: Стратегия «Antigravity» (из внешнего AI-анализа)
+
+> [!IMPORTANT]
+> Данный раздел основан на двух независимых AI-аудитах, выявивших критическую UX-проблему: **задержка 5-10 секунд** при старте голосового взаимодействия.
+
+### 14.1 Анатомия проблемы: «Эффект водопада»
+
+При клике на ParticleOrb `startVoice()` выполняет **6 последовательных** блокирующих операций:
+
+| Шаг | Операция | Задержка | Место в коде |
+|-----|----------|----------|-------------|
+| 1 | iOS Audio Unlock (createElement + play) | 50-200ms | useVoiceSession.ts:442-472 |
+| 2 | `getUserMedia()` — аппаратный доступ к микрофону | 500-1500ms | useVoiceSession.ts:484-500 |
+| 3 | `fetch("/api/gemini-live-token")` — токен + vault context | 200-800ms | useVoiceSession.ts:506-539 |
+| 4 | `import("@/lib/geminiLiveClient")` — динамический импорт | 50-200ms | useVoiceSession.ts:542 |
+| 5 | WebSocket/WebRTC handshake | 500-3000ms | geminiLiveClient.ts / realtimeVoiceClient.ts |
+| 6 | CUDA cold start (local faster-whisper) | 2000-8000ms | Local Core :8000 |
+
+**Итого:** 3.3 - 13.7 секунд от клика до `setOrbState("listening")`
+
+### 14.2 Что уже правильно сделано (НЕ трогаем)
+
+- ✅ TTS pre-warming при mount (Silero/Piper/Qwen) — строки 99-126
+- ✅ Sentence-level TTS streaming — строки 335-354
+- ✅ Barge-in detector (mic RMS) — строки 128-175
+- ✅ iOS audio session unlock — строки 442-472
+- ✅ Fire-and-forget для Obsidian/voice-memory — строки 384-390
+
+### 14.3 Стратегия «Antigravity» — 4 фазы
+
+**Принцип:** Превращаем «ленивую» (lazy) архитектуру в «жадную» (eager) — все тяжёлые операции выполняются ДО клика пользователя.
+
+| Фаза | Оптимизация | Ожидаемый эффект | Риск |
+|------|-------------|------------------|------|
+| **1. Optimistic UI** | Мгновенная перекраска шара + звук в onClick ДО await | Визуальный отклик < 16ms | ⚠️ Минимальный |
+| **2. Pre-warming** | Фоновый `getUserMedia` + кеширование токенов при mount | Убираем 1-2.3 сек await | ⚠️ Нулевой (новый файл) |
+| **3. Early Audio Buffer** | Ring buffer для PCM данных пока WS connecting | 0 потерянных слогов | ⚠️ Низкий |
+| **4. Lazy Admin + Fire-and-forget** | React.lazy для 162KB компонентов + async saveMemory | Разгрузка Main Thread | ⚠️ Минимальный |
+
+### 14.4 Архитектурные риски и митигация (из AI-отчёта)
+
+⚠️ **Phantom Mic Track** → Индикатор записи в Chrome. Митигация: таймаут 5 мин + `visibilitychange` listener.
+
+⚠️ **VRAM утечки** (persistent faster-whisper). Митигация: `compute_type="int8"` + `/api/free-vram` endpoint + `gc.collect()`.
+
+⚠️ **Финансовые издержки Shadow WebRTC** → Keep-alive management с 5-мин таймаутом.
+
+⚠️ **Монопольная блокировка микрофона** → Освобождение tracks при `visibilitychange`.
+
+### 14.5 Дополнительные оптимизации из AI-отчёта
+
+| Оптимизация | Текущее состояние | Рекомендация |
+|-------------|-------------------|-------------|
+| **Zustand shallow selectors** | TopCountersBar подписан на весь store | `useStore(useShallow(s => s.counters))` для точечной перерисовки |
+| **OffscreenCanvas для Three.js** | Three.js в Main Thread | Web Worker + OffscreenCanvas для ParticleOrb.tsx |
+| **ProcessPoolExecutor для Indexer** | Sync embeddings generation | `concurrent.futures.ProcessPoolExecutor` |
+| **Incremental Rolling Summary** | Lavalier summary при Stop | Каждые 5 мин анализ + объединение микро-резюме |
+| **Telegram Long Polling → Events** | Polling в Telethon | `@client.on(events.NewMessage)` + SSE push |
+| **VAD tuning** | silence_duration_ms=600 | Снизить до 300-350ms для «живого» разговора |
+
+> 📋 **Полный Implementation Plan с диффами кода:** см. [implementation_plan.md](file:///C:/Users/anton/.gemini/antigravity/brain/1cde472f-514a-4244-a5f4-e9e267f58561/implementation_plan.md)
+
+---
+
 > **Общий вердикт:** Кодовая база VoiceZettel 2.0 впечатляюще масштабна и функциональна. **22 из 37 функций полностью рабочие**, 12 частично готовы (нужна конфигурация), 3 не реализованы. Основные risk areas: размер файлов DashboardTab/TelegramTab/useVoiceSession и отсутствие Docker Compose для production deployment. Система в целом находится в состоянии **alpha-production** — работает, но требует настройки окружения и доработки UI для нескольких готовых бэкенд-функций.
