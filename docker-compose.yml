@@ -1,0 +1,87 @@
+version: '3.9'
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: services/api
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./services/api:/app
+    depends_on:
+      - chromadb
+      - sqlite
+
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma
+
+  sqlite:
+    image: nouchka/sqlite3
+    volumes:
+      - sqlite_data:/data
+
+  nginx:
+    image: nginx:stable-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+
+  telegram:
+    build:
+      context: services/telegram
+      dockerfile: Dockerfile
+    ports:
+      - "8020:8020"
+    environment:
+      - VAULT_PATH=/vault
+      - OBSIDIAN_REST_URL=${OBSIDIAN_REST_URL:-https://host.docker.internal:27124}
+      - OBSIDIAN_REST_API_KEY=${OBSIDIAN_REST_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      - ${VAULT_PATH:-./VoiceZettel}:/vault
+      - telegram_session:/app/session
+    restart: unless-stopped
+
+  indexer:
+    build:
+      context: services/indexer
+      dockerfile: Dockerfile
+    ports:
+      - "8030:8030"
+    environment:
+      - VAULT_PATH=/vault
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      - ${VAULT_PATH:-./VoiceZettel}:/vault
+    depends_on:
+      - chromadb
+    restart: unless-stopped
+
+volumes:
+  chroma_data:
+  sqlite_data:
+  telegram_session:

@@ -1,0 +1,17 @@
+- [ ] Create `task.md` with detailed checklist for autonomous execution
+- [ ] Run `npm ci` in background to install Node dependencies
+- [ ] Create `docker-compose.yml` orchestrating frontend, api, chroma, sqlite, nginx
+- [ ] Add `Dockerfile.frontend` (Node 20, build Next.js app)
+- [ ] Add `Dockerfile.api` (Python 3.11, install requirements)
+- [ ] Scaffold `src/components/orb/NebulaOrb.tsx` with Three.js animated sphere
+- [ ] Scaffold `src/components/NotificationBell.tsx` (uncertainty UI)
+- [ ] Scaffold `src/components/WidgetFactory.tsx` (dynamic widget creation)
+- [ ] Add premium `src/styles/global.css` (dark mode, glassmorphism, custom palette)
+- [ ] Create OpenClaw agent folder `agents/openclaw/` with `SOUL.md`, `STYLE.md`, `HEARTBEAT.md`
+- [ ] Implement `services/obsidian/sync.py` (watchdog sync placeholder)
+- [ ] Implement `services/telegram/parser.py` (Telethon placeholder)
+- [ ] Implement `services/lapel/pipeline.py` (pyannote + Whisper placeholder)
+- [ ] Add CI workflow `.github/workflows/ci.yml` (if not present)
+- [ ] Run full test suite after each change (npm test, npm run typecheck, npm run lint, pytest)
+- [ ] Verify PWA offline capabilities and IndexedDB buffer init
+- [ ] Deploy locally via `docker-compose up -d` and verify UI at https://voicezettel.online
