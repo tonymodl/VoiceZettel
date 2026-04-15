@@ -7,6 +7,7 @@ import { PromptsTab } from "@/components/admin/PromptsTab";
 import { TelegramTab } from "@/components/admin/TelegramTab";
 import { UsersTab } from "@/components/admin/UsersTab";
 import MissionControlTab from "@/components/admin/MissionControlTab";
+import WorkspaceTab from "@/components/admin/WorkspaceTab";
 import { useAdminStore } from "@/stores/adminStore";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -18,6 +19,7 @@ const TAB_TITLES: Record<string, string> = {
     telegram: "📨 Telegram",
     users: "👥 Пользователи",
     "mission-control": "🛰️ Mission Control",
+    workspace: "📄 Документы",
 };
 
 export default function AdminPage() {
@@ -70,6 +72,7 @@ export default function AdminPage() {
                     {activeTab === "telegram" && <TelegramTab />}
                     {activeTab === "users" && <UsersTab />}
                     {activeTab === "mission-control" && <MissionControlTab />}
+                    {activeTab === "workspace" && <WorkspaceTab />}
                 </main>
             </div>
         </div>

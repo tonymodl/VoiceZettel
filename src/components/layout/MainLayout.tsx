@@ -5,6 +5,7 @@ import { ChatSection } from "@/components/chat/ChatSection";
 import { TopCountersBar } from "@/components/counters/TopCountersBar";
 import { AnimationOverlay } from "@/components/counters/FlyingIcon";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import DailyOffloadOverlay from "@/components/layout/DailyOffloadOverlay";
 import type { ReactNode } from "react";
 
 interface Props {
@@ -35,6 +36,7 @@ export function MainLayout({ topBar }: Props) {
             </div>
 
             <AnimationOverlay />
+            <DailyOffloadOverlay />
         </div>
     );
 }

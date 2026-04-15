@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
-import { Bell, X, Trash2, Sparkles } from "lucide-react";
+import { Bell, X, Trash2, Sparkles, ClipboardList } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useNotificationStore } from "@/stores/notificationStore";
@@ -72,6 +72,7 @@ export function NotificationBell() {
     const removeNotification = useNotificationStore(
         (s) => s.removeNotification,
     );
+    const setOffloadOpen = useNotificationStore((s) => s.setOffloadOpen);
 
     const whatsNewItems = useMemo(
         () => notifications.filter((n) => n.category === "whats_new"),
@@ -206,6 +207,22 @@ export function NotificationBell() {
                                     />
                                 ))
                             )}
+                        </div>
+
+                        {/* Daily Offload button */}
+                        <div className="border-t border-zinc-800 px-3 py-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setOpen(false);
+                                    setOffloadOpen(true);
+                                }}
+                                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-zinc-400 transition-colors hover:bg-violet-500/10 hover:text-violet-300"
+                            >
+                                <ClipboardList className="size-3.5" />
+                                Daily Offload
+                                <span className="ml-auto text-[10px] text-zinc-600">OpenClaw</span>
+                            </button>
                         </div>
                     </motion.div>
                 )}

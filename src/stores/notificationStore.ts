@@ -5,9 +5,26 @@ import type {
     NotificationCategory,
 } from "@/types/notification";
 
+// ── Offload Action (Phase 4: Daily Offload Dashboard) ────
+export interface OffloadAction {
+    id: number;
+    type: "reminder" | "message_draft" | "task_followup" | "birthday" | "health_alert";
+    person_name: string | null;
+    person_id: number | null;
+    title: string;
+    body: string;
+    priority: "low" | "medium" | "high" | "critical";
+    status: "pending" | "approved" | "dismissed" | "executed";
+    trigger_reason: string;
+    created_at: string;
+}
+
 interface NotificationState {
     notifications: AppNotification[];
     unreadCount: number;
+    offloadActions: OffloadAction[];
+    offloadOpen: boolean;
+    offloadLoading: boolean;
 }
 
 interface NotificationActions {
@@ -15,13 +32,20 @@ interface NotificationActions {
     markAllRead: () => void;
     clearAll: () => void;
     removeNotification: (id: string) => void;
+    // Offload actions
+    setOffloadOpen: (open: boolean) => void;
+    loadOffloadActions: () => Promise<void>;
+    resolveOffloadAction: (actionId: number, status: "approved" | "dismissed") => Promise<void>;
 }
 
 export const useNotificationStore = create<
     NotificationState & NotificationActions
->()((set) => ({
+>()((set, get) => ({
     notifications: [],
     unreadCount: 0,
+    offloadActions: [],
+    offloadOpen: false,
+    offloadLoading: false,
 
     addNotification: (message, level, category) =>
         set((state) => {
@@ -66,4 +90,37 @@ export const useNotificationStore = create<
                         : state.unreadCount,
             };
         }),
+
+    // ── Offload Dashboard Actions ────────────────────────
+    setOffloadOpen: (open) => set({ offloadOpen: open }),
+
+    loadOffloadActions: async () => {
+        set({ offloadLoading: true });
+        try {
+            const res = await fetch("/api/crm?view=actions");
+            const data = await res.json();
+            if (data.status === "ok" && data.data) {
+                set({ offloadActions: data.data, offloadLoading: false });
+            } else {
+                set({ offloadActions: [], offloadLoading: false });
+            }
+        } catch {
+            set({ offloadActions: [], offloadLoading: false });
+        }
+    },
+
+    resolveOffloadAction: async (actionId, status) => {
+        try {
+            await fetch(`/api/crm/actions/${actionId}/resolve`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ status }),
+            });
+        } catch { /* non-critical */ }
+
+        // Optimistic UI update — remove from list
+        set((state) => ({
+            offloadActions: state.offloadActions.filter((a) => a.id !== actionId),
+        }));
+    },
 }));

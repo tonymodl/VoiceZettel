@@ -10,6 +10,7 @@ import {
     Menu,
     X,
     Activity,
+    FileText,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAdminStore } from "@/stores/adminStore";
@@ -26,6 +27,7 @@ const NAV_ITEMS: Array<{
         { tab: "telegram", label: "Telegram", icon: MessageSquare },
         { tab: "users", label: "Пользователи", icon: Users },
         { tab: "mission-control", label: "Mission Control", icon: Activity },
+        { tab: "workspace", label: "Документы", icon: FileText },
     ];
 
 export function AdminSidebar() {
