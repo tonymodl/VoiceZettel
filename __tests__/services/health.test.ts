@@ -36,7 +36,7 @@ describe('Service Health Endpoints (Unit)', () => {
     const mainPy = fs.readFileSync('services/telegram/main.py', 'utf-8');
     expect(mainPy).toContain('/health');
     expect(mainPy).toContain('FastAPI');
-    expect(mainPy).toContain('8020');
+    expect(mainPy).toContain('8038');
   });
 
   it('Indexer service main.py exists and has /health endpoint', () => {

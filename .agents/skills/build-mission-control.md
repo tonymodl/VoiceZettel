@@ -1,18 +1,31 @@
----
-name: build-mission-control
-description: Реализация дашборда Mission Control как новой вкладки в админке.
----
+# build-mission-control.md — Артефакт 1: Наблюдаемость (Mission Control)
 
-# Имплементация VoiceZettel Mission Control
+## Назначение
+Вкладка Mission Control для инженерного мониторинга OpenClaw агента.
 
-## Директивы кодогенерации
+## Компоненты
 
-1. **Подготовка**: Установи `@xterm/xterm`, `@xterm/addon-fit`.
+### SSE Endpoint
+- `src/app/api/logs/stream/route.ts` — ReadableStream SSE
+- Читает `data/logs/` и `.antigravity/logs/`
+- Пульсация heartbeat каждые 2 сек
+- Auto-close через 5 мин (anti-zombie)
 
-2. **SSE Backend**: Создай изолированный эндпоинт `src/app/api/logs/stream/route.ts`. Используй `ReadableStream` для трансляции логов демона OpenClaw через SSE.
+### Terminal (xterm.js)
+- `src/components/admin/TerminalView.tsx`
+- Подключается к SSE `/api/logs/stream`
+- Цветная подсветка по уровню (ERROR=red, WARN=yellow, INFO=cyan)
+- JetBrains Mono шрифт, 5000 строк scrollback
 
-3. **Терминал UI**: В `src/components/admin/TerminalView.tsx` динамически импортируй xterm.
+### Trace Visualizer  
+- `src/components/admin/TraceVisualizer.tsx`
+- Показывает дерево сущностей из `/api/openclaw/entities`
 
-4. **AgentPrism**: В `src/components/admin/TraceVisualizer.tsx` настрой визуализацию трассировок агента.
+### Heartbeat Status Bar
+- Встроен в `MissionControlTab.tsx`
+- Polling `/api/openclaw/status` каждые 10 сек
+- Кнопка "Запустить цикл" → POST `/api/openclaw/trigger`
+- Показывает: interval, last_run, raw_files, wiki_pages, pending
 
-5. **Интеграция в UI**: Собери интерфейс в `src/components/admin/MissionControlTab.tsx`. Открой файл `src/components/admin/AdminSidebar.tsx` и аккуратно добавь ссылку на Mission Control в список существующих вкладок. Не меняй стили сайдбара.
+### Sidebar
+- `AdminSidebar.tsx` → tab "mission-control" с иконкой Activity

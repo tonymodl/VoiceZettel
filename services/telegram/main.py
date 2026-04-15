@@ -176,6 +176,11 @@ async def _auto_reconnect():
             logger.info(f"Auto-reconnected to Telegram as {status.get('user', {}).get('name', '?')}")
             # Auto-start live sync with exported chats
             asyncio.create_task(_auto_start_live_sync())
+            # Auto-resume queue if items are pending
+            queued_count = sum(1 for it in export_queue if it.status == "queued")
+            if queued_count > 0:
+                logger.info(f"Auto-resuming queue: {queued_count} items pending")
+                asyncio.create_task(_queue_worker())
         else:
             logger.info(f"Session exists but not authorized: {status.get('status')}")
     except Exception as e:
@@ -333,9 +338,22 @@ async def get_chats():
 # ── Export Endpoints ───────────────────────────────────────────
 
 async def _vectorize_chat_files(chat_name: str, chat_type: str, chat_id: int):
-    """Trigger vectorization for all files of a chat after export."""
+    """Trigger vectorization for all files of a chat after export.
+    v2: parallel with semaphore (up to 5 concurrent requests).
+    v3: fast-fail if indexer is unreachable."""
     import httpx
     from obsidian_writer import TELEGRAM_ROOT, CHAT_TYPE_DIRS, _sanitize
+
+    # Fast-fail: check if indexer is reachable before wasting time
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as probe:
+            r = await probe.get(f"{INDEXER_URL}/health")
+            if r.status_code != 200:
+                logger.warning(f"Indexer health check failed (status {r.status_code}) — skipping vectorization for '{chat_name}'")
+                return 0
+    except Exception:
+        logger.warning(f"Indexer unreachable at {INDEXER_URL} — skipping vectorization for '{chat_name}'")
+        return 0
 
     type_dir = CHAT_TYPE_DIRS.get(chat_type, "Другое")
     safe_name = _sanitize(chat_name)
@@ -344,22 +362,39 @@ async def _vectorize_chat_files(chat_name: str, chat_type: str, chat_id: int):
     if not os.path.isdir(chat_dir):
         return 0
 
+    md_files = [
+        os.path.join(chat_dir, f)
+        for f in os.listdir(chat_dir)
+        if f.endswith(".md")
+    ]
+    if not md_files:
+        return 0
+
     chunks = 0
+    sem = asyncio.Semaphore(5)
+
+    async def _index_one(client: httpx.AsyncClient, fpath: str) -> int:
+        async with sem:
+            try:
+                r = await client.post(
+                    f"{INDEXER_URL}/index/file",
+                    json={"file_path": fpath},
+                )
+                if r.status_code == 200:
+                    return r.json().get("chunks", 0)
+            except Exception as e:
+                logger.warning(f"Vectorize file failed: {os.path.basename(fpath)}: {e}")
+        return 0
+
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            for fname in os.listdir(chat_dir):
-                if fname.endswith(".md"):
-                    file_path = os.path.join(chat_dir, fname)
-                    try:
-                        r = await client.post(
-                            f"{INDEXER_URL}/index/file",
-                            json={"file_path": file_path},
-                        )
-                        if r.status_code == 200:
-                            data = r.json()
-                            chunks += data.get("chunks", 0)
-                    except Exception as e:
-                        logger.warning(f"Vectorize file failed: {fname}: {e}")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            results = await asyncio.gather(
+                *[_index_one(client, fp) for fp in md_files],
+                return_exceptions=True,
+            )
+            for r in results:
+                if isinstance(r, int):
+                    chunks += r
     except Exception as e:
         logger.error(f"Vectorize chat dir failed: {e}")
 
@@ -418,7 +453,18 @@ def _save_queue(queue: list[ExportQueueItem]):
 
 export_queue: list[ExportQueueItem] = _load_queue()
 queue_worker_running = False
-QUEUE_CONCURRENCY = 5
+
+# ── Fix stuck items from previous crashed runs ──────────────────
+# Items stuck in 'exporting' or 'vectorizing' need to be re-queued
+_stuck_reset = 0
+for _item in export_queue:
+    if _item.status in ("exporting", "vectorizing"):
+        _item.status = "queued"
+        _item.error = None
+        _stuck_reset += 1
+if _stuck_reset:
+    _save_queue(export_queue)
+    logger.info(f"Reset {_stuck_reset} stuck queue items back to 'queued'")
 
 
 async def _process_single_chat(item: ExportQueueItem, w: ObsidianWriter):
@@ -533,47 +579,46 @@ async def _process_single_chat(item: ExportQueueItem, w: ObsidianWriter):
 
 
 async def _queue_worker():
-    """Background worker: processes export queue with concurrency limit."""
-    global queue_worker_running, export_state
+    """Background worker: processes export queue SEQUENTIALLY.
+    Telethon client is NOT safe for parallel iter_messages calls,
+    so we export one chat at a time to avoid FloodWait and client conflicts."""
+    global queue_worker_running, export_state, live_sync
     if queue_worker_running:
         return
     queue_worker_running = True
 
     w = _get_writer()
-    sem = asyncio.Semaphore(QUEUE_CONCURRENCY)
 
     export_state["running"] = True
     export_state["status"] = "exporting"
 
     try:
-        while True:
-            # Find queued items
-            queued = [item for item in export_queue if item.status == "queued"]
-            if not queued:
-                break
+        while queue_worker_running:
+            # Find next queued item
+            next_item = None
+            for item in export_queue:
+                if item.status == "queued":
+                    next_item = item
+                    break
 
-            # Launch batch with semaphore
-            tasks = []
-            for item in queued[:QUEUE_CONCURRENCY * 2]:  # Look ahead
-                async def _run(it=item):
-                    async with sem:
-                        await _process_single_chat(it, w)
-                tasks.append(asyncio.create_task(_run()))
+            if next_item is None:
+                break  # No more queued items
 
-            await asyncio.gather(*tasks, return_exceptions=True)
+            # Process single chat
+            await _process_single_chat(next_item, w)
 
-            # Update state
-            active = [it for it in export_queue if it.status in ("queued", "exporting", "vectorizing")]
-            if not active:
-                break
+            # After each successful export, update Live Sync filter
+            if next_item.status == "done" and live_sync and live_sync.is_active:
+                exported_ids = tracker.get_exported_chat_ids()
+                if exported_ids:
+                    live_sync.update_chat_filter(exported_ids)
 
         # Done — clean up completed items (keep errors for visibility)
         done_count = sum(1 for it in export_queue if it.status == "done")
         add_export_log("success", f"Очередь завершена: {done_count} чатов экспортировано")
         _save_export_logs(export_logs)
 
-        # Update live sync
-        global live_sync
+        # Final live sync update
         if live_sync and live_sync.is_active:
             exported_ids = tracker.get_exported_chat_ids()
             if exported_ids:
@@ -947,4 +992,4 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8020)
+    uvicorn.run(app, host="0.0.0.0", port=8038)

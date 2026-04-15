@@ -8,6 +8,7 @@ import {
     Mic, ShieldCheck, ShieldAlert, ShieldX,
     Wrench, Key, CreditCard, Clock,
     Brain, FolderSync, Users, Globe,
+    HeartPulse, Workflow, Satellite,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────
@@ -256,11 +257,11 @@ export function DashboardTab() {
                 descRu: authOk
                     ? `✅ Подключён как ${d.auth.user?.name}. ${d.sync_active ? "Новые сообщения приходят в реальном времени." : "Live-синхронизация выключена — новые сообщения не отслеживаются."}`
                     : "⚠️ Не авторизован в Telegram. Зайдите на вкладку Telegram и введите API-ключи + код.",
-                badge: "8020",
+                badge: "8038",
             });
         } catch {
             setTelegramHealth(null);
-            results.push({ name: "Telegram Service", nameRu: "Телеграм", icon: <MessageSquare className="size-4 text-red-400" />, status: "offline", latency: null, details: "Сервис не отвечает", descRu: "❌ Сервис Telegram не запущен. Экспорт и синхронизация переписок невозможны. Запустите: cd services/telegram && python main.py", badge: "8020" });
+            results.push({ name: "Telegram Service", nameRu: "Телеграм", icon: <MessageSquare className="size-4 text-red-400" />, status: "offline", latency: null, details: "Сервис не отвечает", descRu: "❌ Сервис Telegram не запущен. Экспорт и синхронизация переписок невозможны. Запустите: cd services/telegram && python main.py", badge: "8038" });
         }
 
         // Sync status
@@ -480,6 +481,103 @@ export function DashboardTab() {
                 details: "Не настроен",
                 descRu: "⚠️ Google Workspace ожидает настройки OAuth. Перейдите во вкладку Документы для подключения.",
                 badge: "API",
+            });
+        }
+
+        // 12) OpenClaw Heartbeat Daemon (port 8040)
+        try {
+            const { data, latency } = await fetchWithTimeout("/api/openclaw/health", 4000);
+            const d = data as { service: string; status: string; heartbeat_active: boolean; heartbeat_interval_min: number; last_run: string | null; uptime_seconds: number; worker_status: string; files_processed: number; entities_extracted: number; errors: number };
+            const isActive = d.heartbeat_active;
+            results.push({
+                name: "OpenClaw Heartbeat",
+                nameRu: "Heartbeat (демон)",
+                icon: <HeartPulse className={`size-4 ${isActive ? "text-pink-400" : "text-zinc-500"}`} />,
+                status: isActive ? "online" : "degraded",
+                latency,
+                details: isActive
+                    ? `Every ${d.heartbeat_interval_min}min | ${d.files_processed} files | ${d.entities_extracted} entities`
+                    : `Worker: ${d.worker_status}`,
+                descRu: isActive
+                    ? `✅ Heartbeat активен. Цикл каждые ${d.heartbeat_interval_min} мин. Обработано ${d.files_processed} файлов, извлечено ${d.entities_extracted} сущностей.`
+                    : "⚠️ Heartbeat демон запущен, но не активен. Проверьте конфигурацию.",
+                badge: "8040",
+            });
+        } catch {
+            results.push({
+                name: "OpenClaw Heartbeat",
+                nameRu: "Heartbeat (демон)",
+                icon: <HeartPulse className="size-4 text-zinc-500" />,
+                status: "degraded",
+                latency: null,
+                details: "Демон не запущен",
+                descRu: "⚠️ OpenClaw Heartbeat демон не запущен. Автоматическая обработка файлов не работает. Запустите: cd services/openclaw && python main.py",
+                badge: "8040",
+            });
+        }
+
+        // 13) NLP Pipeline (entity extraction status)
+        try {
+            const { data } = await fetchWithTimeout("/api/openclaw/status", 3000);
+            const d = data as OpenClawStatus & { heartbeat?: { active: boolean; last_run: string | null } };
+            const totalEntities = d.entities.people + d.entities.tasks;
+            const hasEntities = totalEntities > 0;
+            results.push({
+                name: "NLP Pipeline",
+                nameRu: "NLP конвейер",
+                icon: <Workflow className={`size-4 ${hasEntities ? "text-amber-400" : "text-zinc-500"}`} />,
+                status: hasEntities ? "online" : "degraded",
+                latency: null,
+                details: `Персоны: ${d.entities.people} | Задачи: ${d.entities.tasks} | Raw: ${d.raw_files} | Wiki: ${d.wiki_pages}`,
+                descRu: hasEntities
+                    ? `✅ NLP конвейер работает. Извлечено ${d.entities.people} персон и ${d.entities.tasks} задач из ${d.raw_files} сырых файлов.`
+                    : "⚠️ NLP конвейер настроен, но сущности ещё не извлечены. Добавьте файлы в Raw_v2/ и запустите Heartbeat.",
+                badge: "NLP",
+            });
+        } catch {
+            results.push({
+                name: "NLP Pipeline",
+                nameRu: "NLP конвейер",
+                icon: <Workflow className="size-4 text-zinc-500" />,
+                status: "degraded",
+                latency: null,
+                details: "Не проверяется",
+                descRu: "⚠️ Не удалось получить статус NLP конвейера.",
+                badge: "NLP",
+            });
+        }
+
+        // 14) Mission Control SSE (log stream health)
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 3000);
+            const sseRes = await fetch("/api/logs/stream", { signal: controller.signal });
+            clearTimeout(timer);
+            const isStreaming = sseRes.ok && sseRes.headers.get("content-type")?.includes("text/event-stream");
+            results.push({
+                name: "Mission Control SSE",
+                nameRu: "Лог-стриминг",
+                icon: <Satellite className={`size-4 ${isStreaming ? "text-indigo-400" : "text-zinc-500"}`} />,
+                status: isStreaming ? "online" : "degraded",
+                latency: null,
+                details: isStreaming ? "SSE поток активен" : "Поток недоступен",
+                descRu: isStreaming
+                    ? "✅ Server-Sent Events активен. Логи стримятся в Mission Control терминал в реальном времени."
+                    : "⚠️ SSE лог-стриминг не отвечает. Mission Control терминал не сможет показывать логи.",
+                badge: "SSE",
+            });
+            // Abort the SSE connection — we only tested connectivity
+            controller.abort();
+        } catch {
+            results.push({
+                name: "Mission Control SSE",
+                nameRu: "Лог-стриминг",
+                icon: <Satellite className="size-4 text-zinc-500" />,
+                status: "degraded",
+                latency: null,
+                details: "SSE не проверяется",
+                descRu: "⚠️ Лог-стриминг (SSE) не отвечает.",
+                badge: "SSE",
             });
         }
 

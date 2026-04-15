@@ -825,70 +825,92 @@ export function TelegramTab() {
             </section>
 
             {/* ══════════════════════════════════════════════════
-                Section 2: EXPORT TO OBSIDIAN
+                Section 2: EXPORT TO OBSIDIAN (Redesigned)
                ══════════════════════════════════════════════════ */}
             {authStatus.status === "authorized" && (
                 <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 overflow-hidden">
-                    {/* ── Header ────────────────────────────────── */}
-                    <div className="flex items-center gap-3 px-5 py-3">
-                        <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-200">
+                    {/* ── Header with status badges ────────────────── */}
+                    <div className="flex items-center gap-3 border-b border-zinc-800/50 px-5 py-3">
+                        <div className="flex size-8 items-center justify-center rounded-lg bg-blue-500/10">
                             <Archive className="size-4 text-blue-400" />
-                            Экспорт в Obsidian
-                        </h3>
-                        <div className="flex items-center gap-1.5 ml-auto">
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <h3 className="text-sm font-bold text-zinc-200">Экспорт в Obsidian</h3>
+                            <p className="text-[10px] text-zinc-600">
+                                {trackerSummary
+                                    ? `${trackerSummary.completed} чатов · ${trackerSummary.vectorized} векторизовано`
+                                    : "Telegram → Markdown → ChromaDB"}
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-1.5">
                             {trackerSummary && (
                                 <>
-                                    <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
+                                    <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-400">
                                         <CheckCircle2 className="size-2.5" /> {trackerSummary.completed}
                                     </span>
-                                    <span className="flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-400">
+                                    <span className="flex items-center gap-1 rounded-full bg-violet-500/10 px-2.5 py-1 text-[10px] font-semibold text-violet-400">
                                         <Brain className="size-2.5" /> {trackerSummary.vectorized}
                                     </span>
-                                    {(() => {
-                                        const queueItems = exportStatus?.queue || [];
-                                        const activeCount = queueItems.filter((q: QueueItem) => q.status === "exporting" || q.status === "vectorizing").length;
-                                        const queuedCount = queueItems.filter((q: QueueItem) => q.status === "queued").length;
-                                        return (
-                                            <>
-                                                {activeCount > 0 && (
-                                                    <span className="flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-medium text-blue-400">
-                                                        <Loader2 className="size-2.5 animate-spin" /> {activeCount}
-                                                    </span>
-                                                )}
-                                                {queuedCount > 0 && (
-                                                    <span className="flex items-center gap-1 rounded-full bg-zinc-700/40 px-2 py-0.5 text-[10px] font-medium text-zinc-400">
-                                                        <Clock className="size-2.5" /> {queuedCount}
-                                                    </span>
-                                                )}
-                                            </>
-                                        );
-                                    })()}
-                                    {syncStatus?.active && (
-                                        <span className="flex items-center gap-1 rounded-full bg-cyan-500/10 px-2 py-0.5 text-[10px] font-medium text-cyan-400">
-                                            <Radio className="size-2.5 animate-pulse" /> Live
-                                        </span>
-                                    )}
                                 </>
                             )}
-                            {exportStatus?.queue_processing && (
-                                <button type="button" onClick={handleCancelExport}
-                                    className="flex items-center gap-1 rounded-lg bg-red-500/10 px-2 py-1 text-[10px] font-medium text-red-400 transition hover:bg-red-500/20">
-                                    <StopCircle className="size-3" /> Стоп
-                                </button>
+                            {(() => {
+                                const q = exportStatus?.queue || [];
+                                const active = q.filter((i: QueueItem) => i.status === "exporting" || i.status === "vectorizing").length;
+                                const queued = q.filter((i: QueueItem) => i.status === "queued").length;
+                                return (
+                                    <>
+                                        {active > 0 && (
+                                            <span className="flex items-center gap-1 rounded-full bg-blue-500/15 px-2.5 py-1 text-[10px] font-semibold text-blue-400 animate-pulse">
+                                                <Loader2 className="size-2.5 animate-spin" /> {active} обработка
+                                            </span>
+                                        )}
+                                        {queued > 0 && (
+                                            <span className="flex items-center gap-1 rounded-full bg-zinc-700/30 px-2.5 py-1 text-[10px] font-medium text-zinc-400">
+                                                <Clock className="size-2.5" /> {queued} в очереди
+                                            </span>
+                                        )}
+                                    </>
+                                );
+                            })()}
+                            {syncStatus?.active && (
+                                <span className="flex items-center gap-1 rounded-full bg-cyan-500/10 px-2.5 py-1 text-[10px] font-semibold text-cyan-400">
+                                    <Radio className="size-2.5 animate-pulse" /> Live
+                                </span>
                             )}
-                            <button
-                                type="button"
-                                onClick={() => setShowSelector(!showSelector)}
-                                className="flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-xs font-medium text-violet-400 transition-all hover:bg-violet-500/20"
-                            >
-                                <Download className="size-3" />
-                                Добавить чаты
-                                {showSelector ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-                            </button>
                         </div>
                     </div>
 
-                    {/* ── Unified list: queue + tracked chats ────── */}
+                    {/* ── Active processing status bar ──────────────── */}
+                    {exportStatus?.queue_processing && (
+                        <div className="flex items-center gap-3 border-b border-blue-500/10 bg-blue-500/5 px-5 py-2">
+                            <Loader2 className="size-4 animate-spin text-blue-400" />
+                            <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between text-xs">
+                                    <span className="font-medium text-blue-400">Экспорт идёт...</span>
+                                    <div className="flex items-center gap-2">
+                                        <button type="button" onClick={handleCancelExport}
+                                            className="flex items-center gap-1 rounded-lg bg-red-500/10 px-2.5 py-1 text-[10px] font-semibold text-red-400 transition hover:bg-red-500/20">
+                                            <StopCircle className="size-3" /> Стоп
+                                        </button>
+                                    </div>
+                                </div>
+                                {(() => {
+                                    const q = exportStatus?.queue || [];
+                                    const done = q.filter((i: QueueItem) => i.status === "done").length;
+                                    const total = q.length;
+                                    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                                    return (
+                                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
+                                            <div className="h-full rounded-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-700"
+                                                style={{ width: `${Math.max(pct, 3)}%` }} />
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ── Queue + tracked chats list ────────────────── */}
                     {(() => {
                         const queueItems: QueueItem[] = exportStatus?.queue || [];
                         const queueIds = new Set(queueItems.map((q: QueueItem) => q.chat_id));
@@ -932,17 +954,20 @@ export function TelegramTab() {
 
                         if (rows.length === 0) {
                             return (
-                                <div className="flex flex-col items-center gap-1.5 border-t border-zinc-800/50 py-8 text-center">
-                                    <Archive className="size-6 text-zinc-700" />
-                                    <p className="text-xs text-zinc-500">Нажмите «Добавить чаты» → выберите → «В очередь»</p>
+                                <div className="flex flex-col items-center gap-2 py-10 text-center">
+                                    <div className="rounded-full bg-zinc-800/60 p-3">
+                                        <Archive className="size-6 text-zinc-600" />
+                                    </div>
+                                    <p className="text-xs text-zinc-500">Нажмите «Добавить чаты» чтобы начать экспорт</p>
+                                    <p className="text-[10px] text-zinc-700">Telegram → Markdown → Obsidian → ChromaDB</p>
                                 </div>
                             );
                         }
 
                         return (
-                            <div className="max-h-[40vh] overflow-y-auto border-t border-zinc-800/50">
+                            <div className="max-h-[45vh] overflow-y-auto">
                                 {hasDone && (
-                                    <div className="flex justify-end px-4 py-1">
+                                    <div className="flex justify-end border-b border-zinc-800/30 px-4 py-1">
                                         <button type="button" onClick={handleClearDoneQueue}
                                             className="text-[10px] text-zinc-600 transition hover:text-zinc-300">
                                             Очистить готовые ✓
@@ -961,57 +986,61 @@ export function TelegramTab() {
                                     const count = t?.exported_count || item.msgCount;
                                     const lastTime = t?.last_export_time;
 
-                                    // Left border accent
-                                    const border = isExp ? "border-l-blue-500" : isVec ? "border-l-violet-500"
-                                        : isErr ? "border-l-red-500/60" : isQueued ? "border-l-zinc-600"
-                                        : "border-l-transparent";
+                                    // Left border accent color
+                                    const borderColor = isExp ? "border-l-blue-500" : isVec ? "border-l-violet-500"
+                                        : isErr ? "border-l-red-500/60" : isQueued ? "border-l-amber-500/40"
+                                        : isDone ? "border-l-emerald-500/30" : "border-l-transparent";
+
+                                    // Background highlight for active items
+                                    const bgColor = isExp ? "bg-blue-500/3" : isVec ? "bg-violet-500/3" : "";
 
                                     // Status icon
                                     let icon: React.ReactNode;
                                     if (isExp) icon = <Loader2 className="size-3.5 animate-spin text-blue-400" />;
                                     else if (isVec) icon = <Brain className="size-3.5 animate-pulse text-violet-400" />;
-                                    else if (isQueued) icon = <Clock className="size-3.5 text-zinc-500" />;
+                                    else if (isQueued) icon = <Clock className="size-3.5 text-amber-400/70" />;
                                     else if (isErr) icon = <AlertTriangle className="size-3.5 text-red-400" />;
                                     else if (isVectorized) icon = <CheckCircle2 className="size-3.5 text-emerald-400" />;
                                     else if (isDone) icon = <CheckCircle2 className="size-3.5 text-emerald-400/60" />;
                                     else icon = <div className="size-3.5 rounded-full border border-zinc-700" />;
 
-                                    // Live-sync check: all exported chats are monitored by default
+                                    // Live-sync — check actual monitored IDs from backend
                                     const excludedIds = new Set((syncStatus?.excluded_chats || []).map(ec => ec.id));
+                                    const monitoredIds = syncStatus?.monitored_chat_ids ? new Set(syncStatus.monitored_chat_ids) : null;
                                     const isLive = syncStatus?.active && !excludedIds.has(item.id) && (
-                                        syncStatus.monitored_chats === "all" || isDone
+                                        syncStatus.monitored_chats === "all" || (monitoredIds && monitoredIds.has(item.id))
                                     );
 
                                     // Progress %
-                                    const pct = isExp && t?.exported_count && t?.total_messages && t.total_messages > 0
-                                        ? Math.min(100, Math.round((t.exported_count / t.total_messages) * 100)) : null;
+                                    const pct = isExp && t?.exported_count && (t as Record<string, unknown>)?.total_messages && ((t as Record<string, unknown>).total_messages as number) > 0
+                                        ? Math.min(100, Math.round((t.exported_count / ((t as Record<string, unknown>).total_messages as number)) * 100)) : null;
 
                                     return (
                                         <div key={item.id}
-                                            className={`group border-l-2 ${border} px-4 py-1.5 transition-colors hover:bg-zinc-800/30`}>
+                                            className={`group border-l-2 ${borderColor} ${bgColor} px-4 py-2 transition-colors hover:bg-zinc-800/30`}>
                                             <div className="flex items-center gap-2.5">
                                                 <div className="shrink-0 w-4">{icon}</div>
                                                 <div className="min-w-0 flex-1">
                                                     <span className="truncate text-[13px] font-medium text-zinc-200 block">{item.name}</span>
-                                                    <div className="flex items-center gap-1.5 text-[10px] text-zinc-600">
+                                                    <div className="flex items-center gap-2 text-[10px] text-zinc-600">
                                                         <span>{count.toLocaleString()} сообщ.</span>
-                                                        {lastTime && <span>· {new Date(lastTime).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" })}</span>}
-                                                        {isExp && <span className="text-blue-400 font-medium">Экспорт{pct !== null ? ` ${pct}%` : "..."}</span>}
-                                                        {isVec && <span className="text-violet-400 font-medium">Векторизация...</span>}
-                                                        {isQueued && <span className="text-zinc-500">В очереди</span>}
+                                                        {lastTime && <span>· {new Date(lastTime).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>}
+                                                        {isExp && <span className="text-blue-400 font-semibold">Экспорт{pct !== null ? ` ${pct}%` : "..."}</span>}
+                                                        {isVec && <span className="text-violet-400 font-semibold">Векторизация...</span>}
+                                                        {isQueued && <span className="text-amber-400/70">Ожидает</span>}
                                                     </div>
                                                     {pct !== null && (
-                                                        <div className="mt-0.5 h-[3px] w-full overflow-hidden rounded-full bg-zinc-800">
-                                                            <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-500"
+                                                        <div className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-zinc-800">
+                                                            <div className="h-full rounded-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all duration-500"
                                                                 style={{ width: `${pct}%` }} />
                                                         </div>
                                                     )}
                                                 </div>
                                                 {/* Right badges */}
-                                                <div className="flex items-center gap-0.5 shrink-0">
+                                                <div className="flex items-center gap-1 shrink-0">
                                                     {isDone && <span className="rounded p-0.5" title="Экспортировано"><CheckCircle2 className="size-3 text-emerald-400" /></span>}
-                                                    {isLive && <span className="rounded p-0.5" title="Live-синхронизация"><Radio className="size-3 text-cyan-400" /></span>}
-                                                    {isVectorized && <span className="rounded p-0.5" title="Векторизовано"><Brain className="size-3 text-violet-400" /></span>}
+                                                    {isLive && <span className="rounded p-0.5" title="Live"><Radio className="size-3 text-cyan-400" /></span>}
+                                                    {isVectorized && <span className="rounded p-0.5" title={`${t?.vectorized_chunks || 0} chunks`}><Brain className="size-3 text-violet-400" /></span>}
                                                     {(isQueued || isQDone) && (
                                                         <button type="button" onClick={() => handleRemoveFromQueue([item.id])}
                                                             className="rounded p-0.5 text-zinc-700 opacity-0 transition hover:text-red-400 group-hover:opacity-100" title="Убрать">
@@ -1020,9 +1049,9 @@ export function TelegramTab() {
                                                     )}
                                                 </div>
                                             </div>
-                                            {/* Error block with description + retry */}
+                                            {/* Error with retry */}
                                             {isErr && item.qError && (
-                                                <div className="mt-1 ml-6 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2">
+                                                <div className="mt-1.5 ml-6 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2">
                                                     <p className="text-[11px] leading-relaxed text-red-300">{item.qError}</p>
                                                     <div className="mt-1.5 flex items-center gap-2">
                                                         <button type="button"
@@ -1046,14 +1075,36 @@ export function TelegramTab() {
                         );
                     })()}
 
-                    {/* ── Chat Selector (collapsible) ──────────── */}
+                    {/* ── Actions bar ───────────────────────────────── */}
+                    <div className="flex items-center justify-between border-t border-zinc-800/50 px-5 py-2.5">
+                        <button
+                            type="button"
+                            onClick={() => { setShowSelector(!showSelector); if (!showSelector && chats.length === 0) loadChats(); }}
+                            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${showSelector
+                                ? "bg-violet-500/20 text-violet-300 border border-violet-500/30"
+                                : "border border-zinc-700/50 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                            }`}
+                        >
+                            <Download className="size-3" />
+                            {showSelector ? "Скрыть чаты" : "Добавить чаты"}
+                            {showSelector ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+                        </button>
+                        <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => setShowLogs(!showLogs)}
+                                className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-zinc-600 transition hover:bg-zinc-800 hover:text-zinc-400">
+                                <ScrollText className="size-3" /> Лог ({exportLogs.length})
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* ── Chat Selector (collapsible) ──────────────── */}
                     {showSelector && (
                         <div className="border-t border-zinc-800 bg-zinc-950/50 p-4">
-                            <div className="mb-2 flex items-center gap-1.5">
+                            <div className="mb-2.5 flex items-center gap-1.5">
                                 <div className="flex flex-wrap gap-0.5">
                                     {(["all", "private", "group", "channel"] as const).map((t) => (
                                         <button key={t} type="button" onClick={() => setTypeFilter(t)}
-                                            className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-all ${typeFilter === t
+                                            className={`rounded-md px-2 py-0.5 text-[10px] font-medium transition-all ${typeFilter === t
                                                 ? "bg-violet-500/20 text-violet-300"
                                                 : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-400"
                                             }`}>
@@ -1077,22 +1128,22 @@ export function TelegramTab() {
                                 </button>
                             </div>
 
-                            <div className="mb-2 grid max-h-[30vh] grid-cols-1 gap-0.5 overflow-y-auto sm:grid-cols-2 xl:grid-cols-3">
+                            <div className="mb-2.5 grid max-h-[30vh] grid-cols-1 gap-0.5 overflow-y-auto sm:grid-cols-2 xl:grid-cols-3">
                                 {filteredChats.map((c) => (
                                     <ChatCard key={c.id} chat={c} selected={exportSelected.has(c.id)}
                                         onToggle={() => toggleExportChat(c.id)} exportProgress={getExportProgress(c.id)} />
                                 ))}
                                 {filteredChats.length === 0 && (
                                     <div className="col-span-full py-4 text-center text-[11px] text-zinc-600">
-                                        {chats.length === 0 ? "Нажмите ↻ для загрузки" : "Ничего не найдено"}
+                                        {chats.length === 0 ? "Нажмите ↻ для загрузки чатов" : "Ничего не найдено"}
                                     </div>
                                 )}
                             </div>
 
-                            <div className="flex items-center gap-2 border-t border-zinc-800/50 pt-2">
+                            <div className="flex items-center gap-2 border-t border-zinc-800/50 pt-2.5">
                                 <button type="button" onClick={handleAddToQueue}
                                     disabled={exportSelected.size === 0 || loading === "export"}
-                                    className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-1.5 text-[11px] font-semibold text-white transition-all hover:bg-blue-500 disabled:opacity-40">
+                                    className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-[11px] font-semibold text-white transition-all hover:bg-blue-500 disabled:opacity-40">
                                     {loading === "export" ? <Loader2 className="size-3 animate-spin" /> : <Zap className="size-3" />}
                                     В очередь ({exportSelected.size})
                                 </button>
@@ -1107,15 +1158,10 @@ export function TelegramTab() {
                         </div>
                     )}
 
-                    {/* ── Logs (collapsible) ──────────────────── */}
-                    <div className="border-t border-zinc-800">
-                        <button type="button" onClick={() => setShowLogs(!showLogs)}
-                            className="flex w-full items-center gap-2 px-5 py-2 text-[11px] font-medium text-zinc-600 transition-colors hover:bg-zinc-800/30 hover:text-zinc-400">
-                            <ScrollText className="size-3" /> Журнал ({exportLogs.length})
-                            {showLogs ? <ChevronDown className="ml-auto size-3" /> : <ChevronRight className="ml-auto size-3" />}
-                        </button>
-                        {showLogs && (
-                            <div className="max-h-44 overflow-y-auto border-t border-zinc-800/50 bg-zinc-950/50">
+                    {/* ── Logs (collapsible) ────────────────────────── */}
+                    {showLogs && (
+                        <div className="border-t border-zinc-800">
+                            <div className="max-h-44 overflow-y-auto bg-zinc-950/50">
                                 {exportLogs.length === 0 ? (
                                     <div className="py-4 text-center text-[11px] text-zinc-600">Логов пока нет</div>
                                 ) : (
@@ -1124,10 +1170,12 @@ export function TelegramTab() {
                                     ))
                                 )}
                             </div>
-                        )}
-                    </div>
+                        </div>
+                    )}
                 </section>
             )}
+
+
 
 
 

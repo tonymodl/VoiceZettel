@@ -1,18 +1,29 @@
----
-name: build-workspace-integration
-description: Добавление вкладки Workspace в админ-панель и настройка API Gemini.
----
+# build-workspace-integration.md — Артефакт 3: Google Workspace
 
-# Модуль интеграции Workspace
+## Назначение
+Интеграция Google Docs/Sheets как внешних узлов базы знаний.
 
-## Директивы кодогенерации
+## Компоненты
 
-1. **API Мост**: Настрой методы авторизации Google OAuth.
+### Workspace Tab
+- `src/components/admin/WorkspaceTab.tsx`
+- Добавление документов по URL
+- Системный промпт для контекста
+- Sync кнопка → загрузка + чанкирование + индексация
+- Хранение в localStorage
 
-2. **Function Calling**: В `src/lib/providers/google.ts` реализуй схемы `FunctionDeclaration` для работы с Google Docs/Sheets (методы `create_spreadsheet`, `batch_update_cells`).
+### Sync API
+- `POST /api/workspace/sync`
+- Загружает Google Doc через export?format=txt (public)
+- Чанкирует текст (1500 chars, 300 overlap)
+- Индексирует в ChromaDB через Indexer (port 8030)
+- Возвращает: chunkCount, indexedCount, documentTitle
 
-3. **Интеграция в UI Админки**: Создай `src/components/admin/WorkspaceTab.tsx`. В этом файле сделай интерфейс с Google Drive Picker для прикрепления документов и текстовым полем для "Системного промпта документа".
+### Gemini Function Calling (TODO)
+- `src/lib/providers/google.ts` — FunctionDeclaration schemas
+- batch_update_cells для Google Sheets
+- Через Gemini API (не прямой Sheets API)
 
-4. Открой `src/components/admin/AdminSidebar.tsx` и добавь ссылку на новую вкладку "Документы" в список навигации админ-панели.
-
-5. Синхронизируй добавленные документы с новой выделенной коллекцией ChromaDB.
+### Sidebar
+- `AdminSidebar.tsx` → tab "workspace" с иконкой FileText
+- Метка "Документы"

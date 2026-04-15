@@ -54,7 +54,7 @@ class ChatExportProgress:
 
     @property
     def is_complete(self) -> bool:
-        return self.status == "completed" and self.exported_count > 0
+        return self.status == "completed"
 
     def to_dict(self) -> dict:
         return {

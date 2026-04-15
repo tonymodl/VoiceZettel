@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-const TELEGRAM_URL = process.env.TELEGRAM_SERVICE_URL || "http://127.0.0.1:8020";
+const TELEGRAM_URL = process.env.TELEGRAM_SERVICE_URL || "http://127.0.0.1:8038";
 
 async function proxyRequest(req: NextRequest, params: { path: string[] }) {
     const path = params.path.join("/");

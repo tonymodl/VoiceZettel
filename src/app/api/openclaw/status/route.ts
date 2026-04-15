@@ -51,6 +51,38 @@ export async function GET() {
       ? fs.readdirSync(tasksDir).filter((f) => f.endsWith(".md")).length
       : 0;
 
+    // Auto-create shadow dirs if they don't exist
+    if (!fs.existsSync(RAW_DIR)) {
+      fs.mkdirSync(RAW_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(WIKI_DIR)) {
+      fs.mkdirSync(WIKI_DIR, { recursive: true });
+    }
+
+    // Try to get heartbeat daemon status
+    let heartbeat: { active: boolean; interval_min: number; last_run: string | null; uptime: number } = {
+      active: false,
+      interval_min: 30,
+      last_run: null,
+      uptime: 0,
+    };
+    try {
+      const daemonRes = await fetch("http://127.0.0.1:8040/health", {
+        signal: AbortSignal.timeout(2000),
+      });
+      if (daemonRes.ok) {
+        const dh = await daemonRes.json() as Record<string, unknown>;
+        heartbeat = {
+          active: dh.heartbeat_active as boolean ?? false,
+          interval_min: dh.heartbeat_interval_min as number ?? 30,
+          last_run: dh.last_run as string | null ?? null,
+          uptime: dh.uptime_seconds as number ?? 0,
+        };
+      }
+    } catch {
+      // Daemon not running — that's OK
+    }
+
     return NextResponse.json({
       status: "ok",
       configured: configExists,
@@ -66,6 +98,7 @@ export async function GET() {
         raw_v2: fs.existsSync(RAW_DIR),
         wiki_v2: fs.existsSync(WIKI_DIR),
       },
+      heartbeat,
     });
   } catch (error) {
     return NextResponse.json(

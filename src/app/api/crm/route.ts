@@ -107,6 +107,63 @@ export async function GET(request: Request) {
       });
     }
 
+    if (view === "entities") {
+      const people = db
+        .prepare(
+          `SELECT p.id, p.name, p.aliases, p.relationship, p.health_score, p.dunbar_layer,
+                  COUNT(ie.id) as interactions,
+                  MAX(ie.event_date) as last_seen
+           FROM Entity_Person p
+           LEFT JOIN InteractionEvent ie ON p.id = ie.person_id
+           GROUP BY p.id
+           ORDER BY interactions DESC
+           LIMIT 100`
+        )
+        .all();
+
+      const tasks = db
+        .prepare(
+          `SELECT t.id, t.title, t.status, t.assignee, t.deadline, t.created_at, t.source
+           FROM Entity_Task t
+           ORDER BY t.created_at DESC
+           LIMIT 100`
+        )
+        .all();
+
+      db.close();
+      return NextResponse.json({
+        status: "ok",
+        initialized: true,
+        entities: {
+          people,
+          tasks,
+          totalPeople: people.length,
+          totalTasks: tasks.length,
+        },
+      });
+    }
+
+    if (view === "timeline") {
+      const events = db
+        .prepare(
+          `SELECT ie.id, ie.event_type, ie.event_date, ie.sentiment, ie.content,
+                  ie.source_file, ep.name as person_name
+           FROM InteractionEvent ie
+           LEFT JOIN Entity_Person ep ON ie.person_id = ep.id
+           ORDER BY ie.event_date DESC
+           LIMIT 50`
+        )
+        .all();
+
+      db.close();
+      return NextResponse.json({
+        status: "ok",
+        initialized: true,
+        timeline: events,
+        count: events.length,
+      });
+    }
+
     db.close();
     return NextResponse.json({ status: "error", message: "Unknown view" }, { status: 400 });
   } catch (error) {

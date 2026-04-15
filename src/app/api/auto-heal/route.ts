@@ -129,14 +129,14 @@ export async function POST() {
         });
     }
 
-    // 2) Check & heal Telegram (port 8020)
-    const telegramOk = await checkPort(8020);
+    // 2) Check & heal Telegram (port 8038)
+    const telegramOk = await checkPort(8038);
     if (!telegramOk) {
         try {
-            await killPort(8020);
+            await killPort(8038);
             const telegramDir = path.join(ROOT, "services", "telegram");
             await startService(telegramDir, "python", ["main.py"]);
-            const okNow = await checkPort(8020);
+            const okNow = await checkPort(8038);
             actions.push({
                 service: "Telegram",
                 action: "restart",
@@ -343,6 +343,40 @@ export async function POST() {
         }
     } catch {
         // Indexer might still be starting
+    }
+
+    // 6) Check & heal OpenClaw Heartbeat (port 8040)
+    const openclawOk = await checkPort(8040);
+    if (!openclawOk) {
+        try {
+            await killPort(8040);
+            const openclawDir = path.join(ROOT, "services", "openclaw");
+            await startService(openclawDir, "python", ["main.py"]);
+            const okNow = await checkPort(8040);
+            actions.push({
+                service: "OpenClaw Heartbeat",
+                action: "restart",
+                descRu: okNow
+                    ? "✅ OpenClaw Heartbeat перезапущен — автообработка файлов возобновлена"
+                    : "❌ Не удалось запустить OpenClaw Heartbeat daemon",
+                success: okNow,
+            });
+        } catch (err) {
+            actions.push({
+                service: "OpenClaw Heartbeat",
+                action: "restart",
+                descRu: `❌ Ошибка: ${err instanceof Error ? err.message : "unknown"}`,
+                success: false,
+                error: err instanceof Error ? err.message : "unknown",
+            });
+        }
+    } else {
+        actions.push({
+            service: "OpenClaw Heartbeat",
+            action: "check",
+            descRu: "✅ OpenClaw Heartbeat демон уже работает",
+            success: true,
+        });
     }
 
     const allOk = actions.every((a) => a.success);

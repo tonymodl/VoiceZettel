@@ -3,7 +3,8 @@
 import { useState, useCallback } from "react";
 import {
   FileText, Table2, Upload, Link2, RefreshCw,
-  ExternalLink, Settings, Plus, Trash2, CheckCircle2
+  ExternalLink, Settings, Plus, Trash2, CheckCircle2,
+  Loader2, AlertTriangle, FileSearch
 } from "lucide-react";
 
 /**
@@ -20,18 +21,41 @@ interface LinkedDocument {
   systemPrompt: string;
   lastSync: string | null;
   chunkCount: number;
-  status: "synced" | "pending" | "error";
+  indexedCount: number;
+  status: "synced" | "pending" | "syncing" | "error";
+  errorMessage?: string;
 }
 
-// Demo data — will be replaced with real API calls
-const DEMO_DOCS: LinkedDocument[] = [];
+// Will load from localStorage
+function loadDocuments(): LinkedDocument[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const saved = localStorage.getItem("voicezettel_workspace_docs");
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveDocuments(docs: LinkedDocument[]) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("voicezettel_workspace_docs", JSON.stringify(docs));
+}
 
 export default function WorkspaceTab() {
-  const [documents, setDocuments] = useState<LinkedDocument[]>(DEMO_DOCS);
+  const [documents, setDocuments] = useState<LinkedDocument[]>(loadDocuments);
   const [addingNew, setAddingNew] = useState(false);
   const [newUrl, setNewUrl] = useState("");
   const [newPrompt, setNewPrompt] = useState("");
   const [syncing, setSyncing] = useState<string | null>(null);
+
+  const updateAndSave = useCallback((updater: (prev: LinkedDocument[]) => LinkedDocument[]) => {
+    setDocuments((prev) => {
+      const next = updater(prev);
+      saveDocuments(next);
+      return next;
+    });
+  }, []);
 
   const handleAddDocument = useCallback(() => {
     if (!newUrl.trim()) return;
@@ -48,43 +72,80 @@ export default function WorkspaceTab() {
       systemPrompt: newPrompt || "Используй содержимое этого документа как контекст для ответов.",
       lastSync: null,
       chunkCount: 0,
+      indexedCount: 0,
       status: "pending",
     };
 
-    setDocuments((prev) => [...prev, doc]);
+    updateAndSave((prev) => [...prev, doc]);
     setNewUrl("");
     setNewPrompt("");
     setAddingNew(false);
-  }, [newUrl, newPrompt]);
+  }, [newUrl, newPrompt, updateAndSave]);
 
   const handleSync = useCallback(async (docId: string) => {
     setSyncing(docId);
+    // Mark as syncing
+    updateAndSave((prev) =>
+      prev.map((d) => d.id === docId ? { ...d, status: "syncing" as const, errorMessage: undefined } : d)
+    );
+
     try {
+      const doc = documents.find((d) => d.id === docId);
       const res = await fetch("/api/workspace/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ documentId: docId }),
+        body: JSON.stringify({
+          documentId: docId,
+          url: doc?.url,
+          systemPrompt: doc?.systemPrompt,
+        }),
       });
       const data = await res.json();
+
       if (data.status === "ok") {
-        setDocuments((prev) =>
+        updateAndSave((prev) =>
           prev.map((d) =>
             d.id === docId
-              ? { ...d, status: "synced", lastSync: new Date().toISOString(), chunkCount: data.chunkCount || 0 }
+              ? {
+                  ...d,
+                  status: "synced" as const,
+                  lastSync: new Date().toISOString(),
+                  chunkCount: data.chunkCount || 0,
+                  indexedCount: data.indexedCount || 0,
+                  title: data.documentTitle || d.title,
+                  errorMessage: undefined,
+                }
+              : d
+          )
+        );
+      } else {
+        updateAndSave((prev) =>
+          prev.map((d) =>
+            d.id === docId
+              ? { ...d, status: "error" as const, errorMessage: data.message || "Ошибка синхронизации" }
               : d
           )
         );
       }
-    } catch {
-      // Non-critical
+    } catch (err) {
+      updateAndSave((prev) =>
+        prev.map((d) =>
+          d.id === docId
+            ? { ...d, status: "error" as const, errorMessage: err instanceof Error ? err.message : "Неизвестная ошибка" }
+            : d
+        )
+      );
     } finally {
       setSyncing(null);
     }
-  }, []);
+  }, [documents, updateAndSave]);
 
   const handleRemove = useCallback((docId: string) => {
-    setDocuments((prev) => prev.filter((d) => d.id !== docId));
-  }, []);
+    updateAndSave((prev) => prev.filter((d) => d.id !== docId));
+  }, [updateAndSave]);
+
+  const syncedCount = documents.filter((d) => d.status === "synced").length;
+  const totalChunks = documents.reduce((acc, d) => acc + d.chunkCount, 0);
 
   return (
     <div className="space-y-6">
@@ -100,13 +161,22 @@ export default function WorkspaceTab() {
           </div>
         </div>
 
-        <button
-          onClick={() => setAddingNew(true)}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium transition-all hover:bg-blue-500/20"
-        >
-          <Plus className="size-3.5" />
-          Добавить документ
-        </button>
+        <div className="flex items-center gap-3">
+          {documents.length > 0 && (
+            <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+              <span>{syncedCount}/{documents.length} синхр.</span>
+              <span>•</span>
+              <span>{totalChunks} чанков</span>
+            </div>
+          )}
+          <button
+            onClick={() => setAddingNew(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium transition-all hover:bg-blue-500/20"
+          >
+            <Plus className="size-3.5" />
+            Добавить документ
+          </button>
+        </div>
       </div>
 
       {/* OAuth Status */}
@@ -114,17 +184,16 @@ export default function WorkspaceTab() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Settings className="size-4 text-zinc-500" />
-            <span className="text-sm text-zinc-300">Google OAuth</span>
+            <span className="text-sm text-zinc-300">Google Docs Sync</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">
-              Настройте API ключи
+            <span className="text-xs text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+              Публичные документы ✓
             </span>
           </div>
         </div>
         <p className="mt-2 text-xs text-zinc-600">
-          Для полной интеграции необходимо настроить Google OAuth credentials в .env файле.
-          Пока работает режим ручного добавления URL.
+          Публичные Google Docs синхронизируются автоматически. Для приватных документов настройте Google OAuth credentials в .env.
         </p>
       </div>
 
@@ -217,7 +286,11 @@ export default function WorkspaceTab() {
                     className="p-1.5 rounded-lg text-zinc-500 hover:bg-white/5 hover:text-zinc-300 transition-colors disabled:opacity-50"
                     title="Синхронизировать"
                   >
-                    <RefreshCw className={`size-3.5 ${syncing === doc.id ? "animate-spin" : ""}`} />
+                    {syncing === doc.id ? (
+                      <Loader2 className="size-3.5 animate-spin text-blue-400" />
+                    ) : (
+                      <RefreshCw className="size-3.5" />
+                    )}
                   </button>
                   <button
                     onClick={() => handleRemove(doc.id)}
@@ -235,18 +308,43 @@ export default function WorkspaceTab() {
                 <p className="text-xs text-zinc-400 mt-0.5 line-clamp-2">{doc.systemPrompt}</p>
               </div>
 
+              {/* Error message */}
+              {doc.status === "error" && doc.errorMessage && (
+                <div className="mt-2 p-2 rounded-lg bg-red-500/5 border border-red-500/20 flex items-start gap-2">
+                  <AlertTriangle className="size-3.5 text-red-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-300">{doc.errorMessage}</p>
+                </div>
+              )}
+
+              {/* Sync progress */}
+              {doc.status === "syncing" && (
+                <div className="mt-2 flex items-center gap-2 text-xs text-blue-400">
+                  <Loader2 className="size-3.5 animate-spin" />
+                  <span>Загрузка и чанкирование документа...</span>
+                </div>
+              )}
+
               {/* Status bar */}
               <div className="mt-3 flex items-center justify-between text-[10px]">
                 <div className="flex items-center gap-4">
                   <span className={`flex items-center gap-1 ${
                     doc.status === "synced" ? "text-emerald-400" : 
-                    doc.status === "error" ? "text-red-400" : "text-zinc-500"
+                    doc.status === "error" ? "text-red-400" : 
+                    doc.status === "syncing" ? "text-blue-400" : "text-zinc-500"
                   }`}>
                     {doc.status === "synced" && <CheckCircle2 className="size-3" />}
-                    {doc.status === "synced" ? "Синхронизирован" : doc.status === "error" ? "Ошибка" : "Ожидает"}
+                    {doc.status === "syncing" && <Loader2 className="size-3 animate-spin" />}
+                    {doc.status === "error" && <AlertTriangle className="size-3" />}
+                    {doc.status === "synced" ? "Синхронизирован" : 
+                     doc.status === "error" ? "Ошибка" : 
+                     doc.status === "syncing" ? "Синхронизация..." : "Ожидает"}
                   </span>
                   {doc.chunkCount > 0 && (
-                    <span className="text-zinc-600">{doc.chunkCount} чанков в ChromaDB</span>
+                    <span className="text-zinc-600 flex items-center gap-1">
+                      <FileSearch className="size-2.5" />
+                      {doc.chunkCount} чанков
+                      {doc.indexedCount > 0 && ` (${doc.indexedCount} в ChromaDB)`}
+                    </span>
                   )}
                 </div>
                 {doc.lastSync && (
@@ -284,7 +382,7 @@ export default function WorkspaceTab() {
           </li>
           <li className="flex items-start gap-2">
             <span className="text-blue-400 mt-0.5">3.</span>
-            Документ разбивается на чанки и индексируется в выделенную коллекцию ChromaDB
+            Нажмите sync — документ загрузится, разобьётся на чанки и проиндексируется в ChromaDB
           </li>
           <li className="flex items-start gap-2">
             <span className="text-blue-400 mt-0.5">4.</span>

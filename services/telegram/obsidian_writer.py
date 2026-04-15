@@ -1,5 +1,5 @@
 """
-obsidian_writer.py — Write Telegram messages to Obsidian Vault.
+obsidian_writer.py — Write Telegram messages to Obsidian Vault (v2 — fast).
 
 Uses Obsidian Local REST API when available, falls back to direct filesystem writes.
 Structure:
@@ -7,8 +7,15 @@ Structure:
     ├── Личные/{ChatName}/{YYYY-MM-DD}.md
     ├── Группы/{ChatName}/{YYYY-MM-DD}.md
     └── Каналы/{ChatName}/{YYYY-MM-DD}.md
+
+Performance improvements over v1:
+  - O(1) dedup via in-memory set (was O(n) file scan per message)
+  - Reusable httpx.AsyncClient with connection pooling
+  - Batched writes per day-group (single file read + single write)
+  - Non-blocking shadow copies
 """
 
+import asyncio
 import os
 import re
 import ssl
@@ -103,8 +110,31 @@ def _format_message(msg: dict) -> str:
     return " ".join(parts)
 
 
+def _extract_existing_ids(content: str) -> set[int]:
+    """Extract all existing message IDs from file content — O(n) once."""
+    ids: set[int] = set()
+    start = 0
+    marker = "<!-- msg:"
+    while True:
+        pos = content.find(marker, start)
+        if pos == -1:
+            break
+        end = content.find("-->", pos + len(marker))
+        if end == -1:
+            break
+        try:
+            ids.add(int(content[pos + len(marker):end].strip()))
+        except ValueError:
+            pass
+        start = end + 3
+    return ids
+
+
 class ObsidianWriter:
-    """Writes Telegram messages to Obsidian vault via REST API with filesystem fallback."""
+    """Writes Telegram messages to Obsidian vault via REST API with filesystem fallback.
+
+    v2: Optimized for batch performance with connection pooling and set-based dedup.
+    """
 
     def __init__(
         self,
@@ -122,17 +152,40 @@ class ObsidianWriter:
         self._ssl_ctx.check_hostname = False
         self._ssl_ctx.verify_mode = ssl.CERT_NONE
 
+        # Persistent HTTP client for REST API (connection pooling)
+        self._http_client: Optional[httpx.AsyncClient] = None
+
+    async def _get_http_client(self) -> httpx.AsyncClient:
+        """Get or create a reusable httpx client with connection pooling."""
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.AsyncClient(
+                verify=False,
+                timeout=15.0,
+                limits=httpx.Limits(
+                    max_connections=10,
+                    max_keepalive_connections=5,
+                    keepalive_expiry=30,
+                ),
+            )
+        return self._http_client
+
+    async def close(self):
+        """Cleanup HTTP client."""
+        if self._http_client and not self._http_client.is_closed:
+            await self._http_client.aclose()
+            self._http_client = None
+
     async def _check_rest_api(self) -> bool:
         """Check if Obsidian REST API is reachable."""
         if not self.rest_api_url or not self.rest_api_key:
             return False
         try:
-            async with httpx.AsyncClient(verify=False, timeout=3.0) as client:
-                r = await client.get(
-                    f"{self.rest_api_url}/",
-                    headers={"Authorization": f"Bearer {self.rest_api_key}"},
-                )
-                return r.status_code == 200
+            client = await self._get_http_client()
+            r = await client.get(
+                f"{self.rest_api_url}/",
+                headers={"Authorization": f"Bearer {self.rest_api_key}"},
+            )
+            return r.status_code == 200
         except Exception as e:
             logger.debug(f"Obsidian REST API not available: {e}")
             return False
@@ -164,50 +217,46 @@ class ObsidianWriter:
         rel_path = self._get_note_path(chat_name, chat_type, dt)
         return self.vault_path / rel_path
 
-    def _check_message_exists(self, note_path: Path, msg_id: int) -> bool:
-        """Check if a message ID already exists in a note file (dedup)."""
+    def _read_existing_content(self, note_path: Path) -> tuple[str, set[int]]:
+        """Read existing file content and extract message IDs for fast dedup.
+        Returns (content, set_of_existing_ids). O(n) per file, called ONCE per day-group."""
         if not note_path.exists():
-            return False
+            return "", set()
         try:
             content = note_path.read_text(encoding="utf-8")
-            # Messages are formatted as "[HH:MM] **Author**: text"
-            # We'll use a simple marker: <!-- msg:ID -->
-            return f"<!-- msg:{msg_id} -->" in content
+            ids = _extract_existing_ids(content)
+            return content, ids
         except Exception:
-            return False
+            return "", set()
 
     async def _write_via_rest(self, path: str, content: str) -> bool:
-        """Write/append content via Obsidian REST API."""
+        """Write/append content via Obsidian REST API (reusable client)."""
         try:
-            async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
-                # Try to get existing content first
-                existing = ""
-                r = await client.get(
-                    f"{self.rest_api_url}/vault/{path}",
-                    headers={
-                        "Authorization": f"Bearer {self.rest_api_key}",
-                        "Accept": "text/markdown",
-                    },
-                )
-                if r.status_code == 200:
-                    existing = r.text
+            client = await self._get_http_client()
+            headers_auth = {"Authorization": f"Bearer {self.rest_api_key}"}
 
-                # Merge: append new content
-                if existing:
-                    merged = existing.rstrip() + "\n\n" + content
-                else:
-                    merged = content
+            # Try to get existing content first
+            existing = ""
+            r = await client.get(
+                f"{self.rest_api_url}/vault/{path}",
+                headers={**headers_auth, "Accept": "text/markdown"},
+            )
+            if r.status_code == 200:
+                existing = r.text
 
-                # Write back
-                r = await client.put(
-                    f"{self.rest_api_url}/vault/{path}",
-                    headers={
-                        "Authorization": f"Bearer {self.rest_api_key}",
-                        "Content-Type": "text/markdown",
-                    },
-                    content=merged.encode("utf-8"),
-                )
-                return r.status_code in (200, 201, 204)
+            # Merge: append new content
+            if existing:
+                merged = existing.rstrip() + "\n\n" + content
+            else:
+                merged = content
+
+            # Write back
+            r = await client.put(
+                f"{self.rest_api_url}/vault/{path}",
+                headers={**headers_auth, "Content-Type": "text/markdown"},
+                content=merged.encode("utf-8"),
+            )
+            return r.status_code in (200, 201, 204)
         except Exception as e:
             logger.error(f"REST API write failed for {path}: {e}")
             return False
@@ -239,6 +288,8 @@ class ObsidianWriter:
         """
         Write a batch of messages to the vault, grouped by day.
         Returns the number of messages successfully written.
+
+        Performance: uses set-based dedup — O(1) per message check instead of O(n) file scan.
         """
         if not messages:
             return 0
@@ -257,6 +308,8 @@ class ObsidianWriter:
                 day_key = "unknown"
             by_date.setdefault(day_key, []).append(msg)
 
+        shadow_tasks: list[tuple[str, str]] = []
+
         for day_key, day_msgs in sorted(by_date.items()):
             try:
                 dt = datetime.strptime(day_key, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -264,25 +317,32 @@ class ObsidianWriter:
                 dt = datetime.now(timezone.utc)
 
             note_path = self._get_note_path(chat_name, chat_type, dt)
+            check_path = self.vault_path / note_path
+
+            # ── O(1) dedup: read file ONCE, build ID set ──
+            existing_content, existing_ids = self._read_existing_content(check_path)
+            is_new = not existing_content
 
             # Build content for this day
             lines = []
-            # Add frontmatter only for new files
-            check_path = self.vault_path / note_path
-            is_new = not check_path.exists()
-
             if is_new:
                 lines.append(_frontmatter(chat_name, chat_type, day_key, len(day_msgs)))
                 lines.append(f"# {chat_name} — {dt.strftime('%d.%m.%Y')}\n")
 
+            new_count = 0
             for msg in sorted(day_msgs, key=lambda m: m.get("date", "")):
-                # Dedup check: skip if message already written
                 msg_id = msg.get("id")
-                if msg_id and self._check_message_exists(check_path, msg_id):
+                # O(1) set lookup instead of O(n) file scan
+                if msg_id and msg_id in existing_ids:
                     continue
                 formatted = _format_message(msg)
                 if formatted.strip():
                     lines.append(formatted)
+                    new_count += 1
+
+            if new_count == 0:
+                written += len(day_msgs)  # all were skipped (already existed)
+                continue
 
             content = "\n".join(lines)
 
@@ -296,8 +356,15 @@ class ObsidianWriter:
 
             if ok:
                 written += len(day_msgs)
-                # ── Shadow Mode: duplicate raw data to /Raw_v2 for OpenClaw ──
-                await self._write_shadow_copy(note_path, content)
+                # Queue shadow copy for batch processing
+                shadow_tasks.append((note_path, content))
+
+        # ── Shadow copies: non-blocking batch ──
+        if shadow_tasks:
+            await asyncio.gather(
+                *[self._write_shadow_copy(p, c) for p, c in shadow_tasks],
+                return_exceptions=True,
+            )
 
         return written
 
@@ -309,7 +376,12 @@ class ObsidianWriter:
             shadow_rel = original_path.replace(TELEGRAM_ROOT, "Raw_v2/Telegram")
             shadow_full = self.vault_path / shadow_rel
             shadow_full.parent.mkdir(parents=True, exist_ok=True)
-            shadow_full.write_text(content, encoding="utf-8")
+            # Use thread pool for blocking IO to not hold event loop
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: shadow_full.write_text(content, encoding="utf-8"),
+            )
             logger.debug(f"Shadow copy written: {shadow_rel}")
         except Exception as e:
             logger.warning(f"Shadow copy failed (non-critical): {e}")
@@ -326,7 +398,7 @@ class ObsidianWriter:
             "# 📬 Telegram Archive",
             "",
             "| Чат | Тип | Сообщений | Последнее |",
-            "|-----|-----|-----------|-----------|",
+            "|-----|-----|-----------|-----------| ",
         ]
 
         for chat in sorted(chats, key=lambda c: c.get("name", "")):
@@ -345,16 +417,16 @@ class ObsidianWriter:
         if use_rest:
             # Overwrite index completely
             try:
-                async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
-                    r = await client.put(
-                        f"{self.rest_api_url}/vault/{path}",
-                        headers={
-                            "Authorization": f"Bearer {self.rest_api_key}",
-                            "Content-Type": "text/markdown",
-                        },
-                        content=content.encode("utf-8"),
-                    )
-                    return r.status_code in (200, 201, 204)
+                client = await self._get_http_client()
+                r = await client.put(
+                    f"{self.rest_api_url}/vault/{path}",
+                    headers={
+                        "Authorization": f"Bearer {self.rest_api_key}",
+                        "Content-Type": "text/markdown",
+                    },
+                    content=content.encode("utf-8"),
+                )
+                return r.status_code in (200, 201, 204)
             except Exception:
                 pass
 

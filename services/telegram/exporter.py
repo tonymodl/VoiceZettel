@@ -373,7 +373,7 @@ class TelegramExporter:
                     messages.append(msg_dict)
                     count += 1
 
-                    if on_progress and count % 100 == 0:
+                    if on_progress and count % 500 == 0:
                         on_progress(count, total)
 
                 # Completed successfully

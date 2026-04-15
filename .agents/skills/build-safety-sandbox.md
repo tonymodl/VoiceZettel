@@ -1,16 +1,29 @@
----
-name: build-safety-sandbox
-description: Настройка CI/CD, Definition of Done и защитных барьеров перед основным рефакторингом.
----
+# build-safety-sandbox.md — Артефакт 0: Инфраструктура безопасности
 
-# Инициализация защиты существующего кода
+## Назначение
+Защитный периметр для всех изменений в VoiceZettel 2.0.
 
-## Директивы кодогенерации
+## Реализовано
 
-1. **GitHub Actions**: Создай файл `.github/workflows/ci.yml`. Настрой пайплайн, который будет запускать `npm run lint` и `npm run test` при каждом коммите.
+### CI/CD Pipeline
+- `.github/workflows/ci.yml` — lint → typecheck → test → build
+- Запускается на каждый push/PR в main
 
-2. **Unit-тестирование**: Создай папку `__tests__`. Напиши базовые тесты (используя Vitest) для проверки доступности эндпоинтов: `GET /api/health`, проверки WebSocket-сервера на порту `:3099` и Python-микросервисов на `:8020` и `:8030`. Убедись, что рендер `MainLayout.tsx` не падает.
+### Тесты безопасности (Vitest)
+- `__tests__/health-endpoints.test.ts` — 11 contract tests
+- Проверяют JSON schema всех health endpoints
+- Проверяют корректность портов (8038, 8030, 3099, 8040)
 
-3. **Shadow Directories**: В модуле `services/telegram/obsidian_writer.py` не удаляй старую логику. Добавь функцию дублирования сохранения: наряду с классическим сохранением, отправляй копию сырого Markdown файла в новую папку `Vault/Raw_v2/`.
+### Технический долг
+- ✅ `io.BytesIO` заменён (больше нет в codebase)
+- ✅ Порты выровнены: Telegram=8038, Indexer=8030, OpenClaw=8040
 
-4. **Устранение тех. долга**: Проверь `services/telegram/main.py` на наличие блокирующих операций с `io.BytesIO()` при обработке аудио. Убедись, что они завернуты в асинхронные обработчики (`asyncio.to_thread`), чтобы не стопорить весь Telegram-сервис.
+### Порты системы
+| Порт | Сервис |
+|------|--------|
+| 3000 | Next.js (веб-сервер) |
+| 3099 | Gemini WS Proxy |
+| 8030 | ChromaDB Indexer |
+| 8038 | Telegram Service |
+| 8040 | OpenClaw Heartbeat |
+| 27124 | Obsidian REST API |
