@@ -7,6 +7,7 @@ export const AdminTabSchema = z.enum([
     "prompts",
     "telegram",
     "users",
+    "mission-control",
 ]);
 
 export type AdminTab = z.infer<typeof AdminTabSchema>;

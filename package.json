@@ -18,6 +18,8 @@
     "@react-three/drei": "^9.106.0",
     "@react-three/fiber": "^8.13.0",
     "@types/three": "^0.183.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "better-sqlite3": "^12.8.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

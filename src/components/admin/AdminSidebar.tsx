@@ -9,6 +9,7 @@ import {
     Users,
     Menu,
     X,
+    Activity,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAdminStore } from "@/stores/adminStore";
@@ -24,6 +25,7 @@ const NAV_ITEMS: Array<{
         { tab: "prompts", label: "Промпты", icon: BrainCircuit },
         { tab: "telegram", label: "Telegram", icon: MessageSquare },
         { tab: "users", label: "Пользователи", icon: Users },
+        { tab: "mission-control", label: "Mission Control", icon: Activity },
     ];
 
 export function AdminSidebar() {

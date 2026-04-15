@@ -296,8 +296,23 @@ class ObsidianWriter:
 
             if ok:
                 written += len(day_msgs)
+                # ── Shadow Mode: duplicate raw data to /Raw_v2 for OpenClaw ──
+                await self._write_shadow_copy(note_path, content)
 
         return written
+
+    async def _write_shadow_copy(self, original_path: str, content: str) -> None:
+        """Shadow Mode: write a raw copy to Raw_v2/ for LLM-Wiki processing.
+        Never raises — failures are logged but do not break the main pipeline."""
+        try:
+            # Convert: 📬 Telegram/Личные/... → Raw_v2/Telegram/Личные/...
+            shadow_rel = original_path.replace(TELEGRAM_ROOT, "Raw_v2/Telegram")
+            shadow_full = self.vault_path / shadow_rel
+            shadow_full.parent.mkdir(parents=True, exist_ok=True)
+            shadow_full.write_text(content, encoding="utf-8")
+            logger.debug(f"Shadow copy written: {shadow_rel}")
+        except Exception as e:
+            logger.warning(f"Shadow copy failed (non-critical): {e}")
 
     async def write_index(self, chats: list[dict]) -> bool:
         """Write _index.md with a table of all exported chats."""
