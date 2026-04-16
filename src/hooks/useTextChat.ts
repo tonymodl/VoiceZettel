@@ -49,7 +49,7 @@ export function useTextChat() {
             addMessage(userMsg);
 
             // 2. Read settings
-            const { aiProvider, systemPrompt, customWidgets } =
+            const { aiProvider, systemPrompt, customWidgets, useLiteLLM, litellmModel, useHybridSearch } =
                 useSettingsStore.getState();
 
             // 3. Build message history (last 50 messages for context)
@@ -84,18 +84,26 @@ export function useTextChat() {
             abortRef.current = new AbortController();
 
             try {
-                const res = await fetch("/api/chat", {
+                // Phase 2: Shadow Integration — route through LiteLLM if enabled
+                const chatEndpoint = useLiteLLM ? "/api/chat-lite" : "/api/chat";
+                const chatBody: Record<string, unknown> = {
+                    messages: history,
+                    provider: aiProvider,
+                    systemPrompt,
+                    userId,
+                    useHybridSearch,
+                    customWidgetPrompts: customWidgets
+                        .filter((w) => w.enabled && w.prompt)
+                        .map((w) => ({ id: w.id, label: w.label, prompt: w.prompt })),
+                };
+                if (useLiteLLM) {
+                    chatBody.litellm_model = litellmModel;
+                }
+
+                const res = await fetch(chatEndpoint, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        messages: history,
-                        provider: aiProvider,
-                        systemPrompt,
-                        userId,
-                        customWidgetPrompts: customWidgets
-                            .filter((w) => w.enabled && w.prompt)
-                            .map((w) => ({ id: w.id, label: w.label, prompt: w.prompt })),
-                    }),
+                    body: JSON.stringify(chatBody),
                     signal: abortRef.current.signal,
                 });
 

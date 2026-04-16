@@ -30,7 +30,7 @@ export function useChatStream() {
         onSentence: (sentence: string) => void,
         source: "voice" | "text" = "voice",
     ): Promise<string> => {
-        const { aiProvider, systemPrompt, customWidgets } = useSettingsStore.getState();
+        const { aiProvider, systemPrompt, customWidgets, useLiteLLM, litellmModel, useHybridSearch } = useSettingsStore.getState();
         const allMessages = useChatStore.getState().messages;
         const history = allMessages.slice(-20).map((m) => ({
             role: m.role,
@@ -39,19 +39,27 @@ export function useChatStream() {
 
         abortRef.current = new AbortController();
 
-        const res = await fetch("/api/chat", {
+        // Phase 2: Shadow Integration — route through LiteLLM if enabled
+        const chatEndpoint = useLiteLLM ? "/api/chat-lite" : "/api/chat";
+        const chatBody: Record<string, unknown> = {
+            messages: history,
+            provider: aiProvider,
+            systemPrompt,
+            userId,
+            source,
+            useHybridSearch,
+            customWidgetPrompts: customWidgets
+                .filter((w) => w.enabled && w.prompt)
+                .map((w) => ({ id: w.id, label: w.label, prompt: w.prompt })),
+        };
+        if (useLiteLLM) {
+            chatBody.litellm_model = litellmModel;
+        }
+
+        const res = await fetch(chatEndpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                messages: history,
-                provider: aiProvider,
-                systemPrompt,
-                userId,
-                source,
-                customWidgetPrompts: customWidgets
-                    .filter((w) => w.enabled && w.prompt)
-                    .map((w) => ({ id: w.id, label: w.label, prompt: w.prompt })),
-            }),
+            body: JSON.stringify(chatBody),
             signal: abortRef.current.signal,
         });
 

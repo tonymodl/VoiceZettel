@@ -29,18 +29,36 @@ interface ChromaResult {
  * Searches across all sources: Telegram, sessions, Zettelkasten.
  * Returns formatted context string or empty string on failure.
  * Timeout: 3000ms to allow for embedding + search.
+ *
+ * Phase 2: When `useHybrid` is true, uses the /search/hybrid endpoint
+ * which combines ChromaDB vector search + BM25 keyword search via RRF.
+ * Falls back to standard /search on hybrid failure.
  */
-export async function fetchChromaContext(query: string): Promise<string> {
+export async function fetchChromaContext(query: string, useHybrid = false): Promise<string> {
     try {
-        const res = await fetch(`${INDEXER_URL}/search`, {
+        // Phase 2: Shadow Integration — try hybrid search first if enabled
+        const endpoint = useHybrid ? `${INDEXER_URL}/search/hybrid` : `${INDEXER_URL}/search`;
+
+        let res = await fetch(endpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 query,
                 top_k: 7,
             }),
-            signal: AbortSignal.timeout(3000),
+            signal: AbortSignal.timeout(useHybrid ? 5000 : 3000),
         });
+
+        // Fallback: if hybrid failed, try standard search
+        if (!res.ok && useHybrid) {
+            logger.warn("[chatContext] Hybrid search failed, falling back to standard vector search");
+            res = await fetch(`${INDEXER_URL}/search`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query, top_k: 7 }),
+                signal: AbortSignal.timeout(3000),
+            });
+        }
 
         if (!res.ok) return "";
 
@@ -54,11 +72,15 @@ export async function fetchChromaContext(query: string): Promise<string> {
             note: "📄 Заметка",
         };
 
-        const parts = ["--- РЕЛЕВАНТНЫЙ КОНТЕКСТ ИЗ ВСЕХ ХРАНИЛИЩ (ChromaDB RAG) ---"];
+        const searchType = useHybrid ? "Hybrid BM25+ChromaDB RRF" : "ChromaDB RAG";
+        const parts = [`--- РЕЛЕВАНТНЫЙ КОНТЕКСТ ИЗ ВСЕХ ХРАНИЛИЩ (${searchType}) ---`];
         for (const r of results) {
             const title = r.metadata?.title ?? "без названия";
             const source = SOURCE_LABELS[r.metadata?.source_type] ?? "📄";
-            parts.push(`• ${source} [${title}] (${r.relevance_pct}%) ${r.text.slice(0, 400)}`);
+            const sources = r.metadata?.search_sources
+                ? ` [${(r.metadata.search_sources as unknown as string[]).join("+")}]`
+                : "";
+            parts.push(`• ${source} [${title}] (${r.relevance_pct}%${sources}) ${r.text.slice(0, 400)}`);
         }
         parts.push("--- КОНЕЦ КОНТЕКСТА ---");
         return parts.join("\n");

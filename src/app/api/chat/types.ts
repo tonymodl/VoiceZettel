@@ -35,6 +35,8 @@ export const ChatRequestSchema = z.object({
             prompt: z.string(),
         }),
     ).optional(),
+    /** Phase 2: use hybrid BM25+ChromaDB search instead of pure vector */
+    useHybridSearch: z.boolean().optional(),
 });
 
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;

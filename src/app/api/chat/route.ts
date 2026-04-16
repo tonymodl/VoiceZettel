@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
         );
     }
 
-    const { messages, provider, systemPrompt, userId, source, customWidgetPrompts } = parsed.data;
+    const { messages, provider, systemPrompt, userId, source, customWidgetPrompts, useHybridSearch } = parsed.data;
     const isVoice = source === "voice";
 
     if (provider === "openai" && !OPENAI_API_KEY) {
@@ -63,8 +63,9 @@ export async function POST(req: NextRequest) {
         await ensureVaultPreloaded(userId);
 
         // ChromaDB RAG (optional, timeout-protected)
+        // Phase 2: pass useHybridSearch for BM25+RRF hybrid search
         const chromaContext = userQuery.length > 3
-            ? await fetchChromaContext(userQuery)
+            ? await fetchChromaContext(userQuery, useHybridSearch)
             : "";
 
         const enrichedPrompt = buildEnrichedPrompt({
