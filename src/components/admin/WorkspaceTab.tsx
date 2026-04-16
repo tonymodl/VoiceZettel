@@ -5,7 +5,7 @@ import {
   FileText, Table2, Upload, Link2, RefreshCw,
   ExternalLink, Plus, Trash2, CheckCircle2,
   Loader2, AlertTriangle, FileSearch, Presentation,
-  LogIn, LogOut, ShieldCheck, Globe
+  LogIn, LogOut, ShieldCheck, Globe, HardDrive
 } from "lucide-react";
 
 /**
@@ -62,6 +62,28 @@ const DOC_TYPE_LABELS = {
   slides: "Презентация",
 };
 
+/** Load Google Picker API script dynamically */
+function loadPickerScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if ((window as unknown as Record<string, unknown>).__pickerLoaded) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://apis.google.com/js/api.js";
+    script.onload = () => {
+      (window as unknown as Record<string, { load: (lib: string, cb: { callback: () => void }) => void }>).gapi.load("picker", {
+        callback: () => {
+          (window as unknown as Record<string, boolean>).__pickerLoaded = true;
+          resolve();
+        },
+      });
+    };
+    script.onerror = () => reject(new Error("Failed to load Google Picker API"));
+    document.head.appendChild(script);
+  });
+}
+
 export default function WorkspaceTab() {
   const [documents, setDocuments] = useState<LinkedDocument[]>(loadDocuments);
   const [addingNew, setAddingNew] = useState(false);
@@ -70,6 +92,7 @@ export default function WorkspaceTab() {
   const [syncing, setSyncing] = useState<string | null>(null);
   const [googleStatus, setGoogleStatus] = useState<GoogleStatus | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [pickerLoading, setPickerLoading] = useState(false);
 
   // Check Google connection status
   useEffect(() => {
@@ -86,6 +109,78 @@ export default function WorkspaceTab() {
       return next;
     });
   }, []);
+
+  /** Open Google Drive Picker to browse and select documents */
+  const handleOpenPicker = useCallback(async () => {
+    setPickerLoading(true);
+    try {
+      // 1. Get access token
+      const tokenRes = await fetch("/api/auth/google/picker-token");
+      if (!tokenRes.ok) throw new Error("Не удалось получить токен");
+      const { accessToken, clientId, appId } = await tokenRes.json();
+
+      // 2. Load Picker script
+      await loadPickerScript();
+
+      // 3. Open Picker
+      const google = (window as unknown as Record<string, unknown>).google as {
+        picker: {
+          PickerBuilder: new () => {
+            addView: (view: unknown) => unknown;
+            setOAuthToken: (token: string) => unknown;
+            setDeveloperKey: (key: string) => unknown;
+            setAppId: (id: string) => unknown;
+            setCallback: (cb: (data: { action: string; docs?: Array<{ id: string; name: string; url: string; mimeType: string }> }) => void) => unknown;
+            build: () => { setVisible: (visible: boolean) => void };
+          };
+          ViewId: { DOCS: string; SPREADSHEETS: string; PRESENTATIONS: string };
+          DocsView: new (viewId: string) => unknown;
+          Action: { PICKED: string };
+        };
+      };
+
+      const picker = new google.picker.PickerBuilder()
+        .addView(new google.picker.DocsView(google.picker.ViewId.DOCS))
+        .addView(new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS))
+        .addView(new google.picker.DocsView(google.picker.ViewId.PRESENTATIONS))
+        .setOAuthToken(accessToken)
+        .setAppId(appId || clientId?.split("-")[0] || "")
+        .setCallback((data: { action: string; docs?: Array<{ id: string; name: string; url: string; mimeType: string }> }) => {
+          if (data.action === google.picker.Action.PICKED && data.docs) {
+            for (const pickedDoc of data.docs) {
+              const docType = pickedDoc.mimeType.includes("spreadsheet")
+                ? "sheet" as const
+                : pickedDoc.mimeType.includes("presentation")
+                ? "slides" as const
+                : "doc" as const;
+
+              const newDoc: LinkedDocument = {
+                id: pickedDoc.id,
+                title: pickedDoc.name,
+                type: docType,
+                url: pickedDoc.url,
+                systemPrompt: `Используй содержимое ${DOC_TYPE_LABELS[docType].toLowerCase()} "${pickedDoc.name}" как контекст для ответов.`,
+                lastSync: null,
+                chunkCount: 0,
+                indexedCount: 0,
+                fetchMethod: "oauth",
+                status: "pending",
+              };
+              updateAndSave((prev) => {
+                if (prev.some((d) => d.id === pickedDoc.id)) return prev;
+                return [...prev, newDoc];
+              });
+            }
+          }
+        })
+        .build();
+      picker.setVisible(true);
+    } catch (err) {
+      console.error("[Picker]", err);
+    } finally {
+      setPickerLoading(false);
+    }
+  }, [updateAndSave]);
 
   const handleAddDocument = useCallback(() => {
     if (!newUrl.trim()) return;
@@ -226,12 +321,26 @@ export default function WorkspaceTab() {
               Синхронизировать все
             </button>
           )}
+          {googleStatus?.connected && (
+            <button
+              onClick={handleOpenPicker}
+              disabled={pickerLoading}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium transition-all hover:bg-emerald-500/20 disabled:opacity-50"
+            >
+              {pickerLoading ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <HardDrive className="size-3.5" />
+              )}
+              Выбрать из Drive
+            </button>
+          )}
           <button
             onClick={() => setAddingNew(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium transition-all hover:bg-blue-500/20"
           >
             <Plus className="size-3.5" />
-            Добавить
+            По URL
           </button>
         </div>
       </div>
