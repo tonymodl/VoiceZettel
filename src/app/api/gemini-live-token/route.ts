@@ -67,78 +67,90 @@ export async function POST(req: NextRequest) {
         // нет тела — anonymous
     }
 
-    // Загружаем заметки Obsidian и конденсируем на сервере
-    let condensedVault = "";
-    try {
-        const rawVault = await loadVaultContext(userId);
-        if (rawVault.length > 0) {
-            condensedVault = condenseVaultNotes(rawVault);
-        }
-    } catch {
-        // продолжаем без контекста
-    }
-
-    // Загружаем последние данные из ChromaDB (Telegram переписки и др.)
+    // Antigravity: Load vault + ChromaDB in PARALLEL
+    const startMs = Date.now();
     const INDEXER_URL = process.env.INDEXER_SERVICE_URL ?? "http://127.0.0.1:8030";
-    let chromaContext = "";
-    try {
-        // Fetch diverse context from all stores via ChromaDB
-        const queries = [
-            "личные сообщения переписка сегодня",
-            "Настя Рудакова прокси proxy запуск",
-            "последние разговоры чат telegram обсуждение",
-            "важное задачи планы работа проект",
-        ];
-        const allResults: string[] = [];
 
-        for (const q of queries) {
-            const res = await fetch(`${INDEXER_URL}/search`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: q, top_k: 7 }),
-                signal: AbortSignal.timeout(3000),
-            });
-            if (res.ok) {
-                const results = await res.json() as Array<{
-                    text: string;
-                    metadata: Record<string, string>;
-                    relevance_pct: number;
-                }>;
-                for (const r of results) {
-                    const srcType = r.metadata?.source_type ?? "note";
-                    const chatType = r.metadata?.chat_type ?? "";
-                    const title = r.metadata?.title ?? "";
-                    const date = r.metadata?.date ?? "";
-                    
-                    // Format: clear identification of chat partner
-                    let label = "";
-                    if (srcType === "telegram") {
-                        if (chatType === "private") {
-                            label = `📬 ЛИЧНЫЙ ЧАТ с "${title}" (${date})`;
-                        } else if (chatType === "group" || chatType === "supergroup") {
-                            label = `📬 ГРУППА "${title}" (${date})`;
-                        } else if (chatType === "channel") {
-                            label = `📬 КАНАЛ "${title}" (${date})`;
-                        } else {
-                            label = `📬 Telegram "${title}" (${date})`;
-                        }
-                    } else if (srcType === "session") {
-                        label = `📝 Сессия с ассистентом (${date})`;
-                    } else {
-                        label = `🗃 Заметка "${title}"`;
-                    }
-                    
-                    allResults.push(`${label}:\n${r.text.slice(0, 400)}`);
-                }
+    // Fire both vault and chroma concurrently
+    const [vaultResult, chromaResult] = await Promise.allSettled([
+        // Task 1: Vault notes from Obsidian
+        (async () => {
+            try {
+                const rawVault = await loadVaultContext(userId);
+                return rawVault.length > 0 ? condenseVaultNotes(rawVault) : "";
+            } catch {
+                return "";
             }
-        }
+        })(),
+        // Task 2: ChromaDB context (all queries parallel)
+        (async () => {
+            try {
+                const queries = [
+                    "личные сообщения переписка сегодня",
+                    "Настя Рудакова прокси proxy запуск",
+                    "последние разговоры чат telegram обсуждение",
+                    "важное задачи планы работа проект",
+                ];
 
-        if (allResults.length > 0) {
-            chromaContext = "\n\nДАННЫЕ ИЗ ХРАНИЛИЩ (\"Антон Евсин\" или \"Антон\" = ВЛАДЕЛЕЦ, остальные имена = его собеседники):\n\n" + allResults.slice(0, 12).join("\n\n");
-        }
-    } catch {
-        // Indexer may not be running
-    }
+                const queryResults = await Promise.allSettled(
+                    queries.map(async (q) => {
+                        const res = await fetch(`${INDEXER_URL}/search`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ query: q, top_k: 7 }),
+                            signal: AbortSignal.timeout(1500),
+                        });
+                        if (!res.ok) return [];
+                        return await res.json() as Array<{
+                            text: string;
+                            metadata: Record<string, string>;
+                            relevance_pct: number;
+                        }>;
+                    })
+                );
+
+                const allResults: string[] = [];
+                for (const result of queryResults) {
+                    if (result.status !== "fulfilled" || !result.value) continue;
+                    for (const r of result.value) {
+                        const srcType = r.metadata?.source_type ?? "note";
+                        const chatType = r.metadata?.chat_type ?? "";
+                        const title = r.metadata?.title ?? "";
+                        const date = r.metadata?.date ?? "";
+
+                        let label = "";
+                        if (srcType === "telegram") {
+                            if (chatType === "private") {
+                                label = `📬 ЛИЧНЫЙ ЧАТ с "${title}" (${date})`;
+                            } else if (chatType === "group" || chatType === "supergroup") {
+                                label = `📬 ГРУППА "${title}" (${date})`;
+                            } else if (chatType === "channel") {
+                                label = `📬 КАНАЛ "${title}" (${date})`;
+                            } else {
+                                label = `📬 Telegram "${title}" (${date})`;
+                            }
+                        } else if (srcType === "session") {
+                            label = `📝 Сессия с ассистентом (${date})`;
+                        } else {
+                            label = `🗃 Заметка "${title}"`;
+                        }
+
+                        allResults.push(`${label}:\n${r.text.slice(0, 400)}`);
+                    }
+                }
+
+                if (allResults.length > 0) {
+                    return "\n\nДАННЫЕ ИЗ ХРАНИЛИЩ (\"Антон Евсин\" или \"Антон\" = ВЛАДЕЛЕЦ, остальные имена = его собеседники):\n\n" + allResults.slice(0, 12).join("\n\n");
+                }
+                return "";
+            } catch {
+                return "";
+            }
+        })(),
+    ]);
+
+    const condensedVault = vaultResult.status === "fulfilled" ? vaultResult.value : "";
+    const chromaContext = chromaResult.status === "fulfilled" ? chromaResult.value : "";
 
     // Объединяем контексты
     const fullContext = condensedVault + chromaContext;
@@ -149,10 +161,12 @@ export async function POST(req: NextRequest) {
         ? `${appUrl.replace("http://", "ws://").replace("https://", "wss://")}/ws-gemini`
         : "ws://localhost:3099";
 
-    // eslint-disable-next-line no-console
-    console.log(`[GeminiLiveToken] userId=${userId}, vault=${condensedVault.length}ch, chroma=${chromaContext.length}ch, total=${fullContext.length}ch`);
+    const elapsedMs = Date.now() - startMs;
 
-    logger.info(`[GeminiLiveToken] userId=${userId}, vault=${condensedVault.length}, chroma=${chromaContext.length}`);
+    // eslint-disable-next-line no-console
+    console.log(`[GeminiLiveToken] userId=${userId}, vault=${condensedVault.length}ch, chroma=${chromaContext.length}ch, total=${fullContext.length}ch, ${elapsedMs}ms`);
+
+    logger.info(`[GeminiLiveToken] userId=${userId}, vault=${condensedVault.length}, chroma=${chromaContext.length}, ${elapsedMs}ms`);
 
     return NextResponse.json({ wsUrl, vaultContext: fullContext });
 }
