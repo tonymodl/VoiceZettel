@@ -649,6 +649,13 @@ export function useVoiceSession() {
                     }
                 },
                 onLog: (msg: string, data?: unknown) => logger.remoteLog("info", "[GeminiLive] " + msg, data),
+                capabilities: {
+                    voiceTools: useSettingsStore.getState().voiceTools,
+                    voiceSearchKnowledge: useSettingsStore.getState().voiceSearchKnowledge,
+                    voiceSystemStatus: useSettingsStore.getState().voiceSystemStatus,
+                    voiceUrlAccess: useSettingsStore.getState().voiceUrlAccess,
+                    voiceTaskManagement: useSettingsStore.getState().voiceTaskManagement,
+                },
             });
 
             return;

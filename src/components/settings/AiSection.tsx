@@ -3,6 +3,7 @@
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useNotificationStore } from "@/stores/notificationStore";
 import { Switch } from "@/components/ui/switch";
+import { VoiceCapabilitiesSection } from "@/components/settings/VoiceCapabilitiesSection";
 
 const PROVIDERS = [
     { key: "openai" as const, label: "OpenAI", notif: "Мозги: OpenAI — применится к следующему сообщению" },
@@ -147,6 +148,9 @@ export function AiSection() {
                     </div>
                 </section>
             )}
+
+            {/* ── Voice Capabilities ── */}
+            <VoiceCapabilitiesSection />
         </div>
     );
 }

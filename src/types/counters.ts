@@ -92,6 +92,17 @@ export interface SettingsState {
     useHybridSearch: boolean;
     /** Deep Agent: LangChain агент для обогащения заметок */
     useDeepAgent: boolean;
+    // ── Voice Capabilities (Gemini Live Function Calling) ────
+    /** Master toggle: enable tool calling in Gemini Live */
+    voiceTools: boolean;
+    /** Search ChromaDB/Obsidian knowledge stores */
+    voiceSearchKnowledge: boolean;
+    /** View system status, logs, dashboard */
+    voiceSystemStatus: boolean;
+    /** Browse URLs shared by user */
+    voiceUrlAccess: boolean;
+    /** Create tasks, save notes, manage work */
+    voiceTaskManagement: boolean;
 }
 
 export interface SettingsActions {
@@ -128,4 +139,10 @@ export interface SettingsActions {
     setLitellmModel: (model: string) => void;
     toggleHybridSearch: () => void;
     toggleDeepAgent: () => void;
+    // ── Voice Capabilities actions ───────────────────────────
+    toggleVoiceTools: () => void;
+    toggleVoiceSearchKnowledge: () => void;
+    toggleVoiceSystemStatus: () => void;
+    toggleVoiceUrlAccess: () => void;
+    toggleVoiceTaskManagement: () => void;
 }

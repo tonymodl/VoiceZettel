@@ -26,6 +26,14 @@ interface GeminiLiveOptions {
     onAudioLevel: (level: number) => void;
     onMessage: (userText: string, assistantText: string) => void;
     onLog: (msg: string, data?: unknown) => void;
+    /** Active voice capabilities from settings */
+    capabilities?: {
+        voiceTools: boolean;
+        voiceSearchKnowledge: boolean;
+        voiceSystemStatus: boolean;
+        voiceUrlAccess: boolean;
+        voiceTaskManagement: boolean;
+    };
 }
 
 function stopPlayback() {
@@ -104,10 +112,20 @@ function buildSystemInstruction(vaultContext: string): string {
 - 🗃 Zettelkasten: заметки, идеи, факты, персоны
 - 📝 Сессии: логи прошлых диалогов с тобой
 
+ИНСТРУМЕНТЫ (TOOLS):
+Если у тебя есть доступные инструменты — ОБЯЗАТЕЛЬНО используй их для ответа!
+- search_knowledge: ищи данные в хранилищах ChromaDB (Telegram, заметки, сессии)
+- get_system_status: проверяй состояние всех сервисов
+- browse_url: открывай ссылки которые даёт пользователь
+- save_memory: сохраняй важную информацию
+- create_task: создавай задачи в Obsidian
+
 ПРИМЕРЫ ОТВЕТОВ:
-- "Что писала Настя?" → Ищи строки "**Настя Рудакова**: ..." в контексте и перескажи
-- "Что я писал Насте?" → Ищи строки "**Антон Евсин**: ..." или "**Антон**: ..." в чате с Настей
-- "Есть новые сообщения?" → Проверь все чаты и сообщи кто писал`;
+- "Что писала Настя?" → Вызови search_knowledge(query="Настя") и перескажи
+- "Что я писал Насте?" → Вызови search_knowledge(query="Антон Евсин Настя", source_type="telegram")
+- "Есть новые сообщения?" → Вызови search_knowledge(query="последние сообщения сегодня")
+- "Статус систем?" → Вызови get_system_status()
+- "Открой ссылку ..." → Вызови browse_url(url="...")`;
 
     if (vaultContext && vaultContext.trim().length > 0) {
         return `${base}\n\n${vaultContext.slice(0, 15000)}`;
@@ -116,8 +134,86 @@ function buildSystemInstruction(vaultContext: string): string {
     return base;
 }
 
+/** Build Gemini Live tool declarations based on active capabilities */
+function buildTools(caps?: GeminiLiveOptions["capabilities"]) {
+    if (!caps?.voiceTools) return undefined;
+
+    const declarations: Array<Record<string, unknown>> = [];
+
+    if (caps.voiceSearchKnowledge) {
+        declarations.push({
+            name: "search_knowledge",
+            description: "Поиск по всем хранилищам данных: Telegram переписки, Zettelkasten заметки, голосовые сессии. ИСПОЛЬЗУЙ когда пользователь спрашивает о людях, событиях, переписках, заметках.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    query: { type: "STRING", description: "Поисковый запрос на русском" },
+                    source_type: { type: "STRING", description: "Фильтр: telegram, session, zettelkasten, или пустой для всех" },
+                },
+                required: ["query"],
+            },
+        });
+    }
+
+    if (caps.voiceSystemStatus) {
+        declarations.push({
+            name: "get_system_status",
+            description: "Получить статус всех сервисов VoiceZettel: ChromaDB индексер, Obsidian, основное приложение. Используй когда спрашивают о состоянии систем.",
+            parameters: { type: "OBJECT", properties: {} },
+        });
+    }
+
+    if (caps.voiceUrlAccess) {
+        declarations.push({
+            name: "browse_url",
+            description: "Открыть и прочитать содержимое веб-страницы по URL. Используй когда пользователь даёт ссылку.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    url: { type: "STRING", description: "URL веб-страницы" },
+                },
+                required: ["url"],
+            },
+        });
+    }
+
+    if (caps.voiceTaskManagement) {
+        declarations.push({
+            name: "save_memory",
+            description: "Сохранить информацию в память. Используй когда пользователь делится фактами, идеями, предпочтениями.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    text: { type: "STRING", description: "Что нужно запомнить" },
+                    tags: {
+                        type: "ARRAY",
+                        items: { type: "STRING" },
+                        description: "Теги: preference, fact, goal, person, habit, event, idea",
+                    },
+                },
+                required: ["text"],
+            },
+        });
+        declarations.push({
+            name: "create_task",
+            description: "Создать задачу/заметку в Obsidian. Используй когда пользователь просит создать задачу или запись.",
+            parameters: {
+                type: "OBJECT",
+                properties: {
+                    title: { type: "STRING", description: "Название задачи" },
+                    description: { type: "STRING", description: "Описание задачи" },
+                },
+                required: ["title"],
+            },
+        });
+    }
+
+    if (declarations.length === 0) return undefined;
+    return [{ functionDeclarations: declarations }];
+}
+
 export function connectGeminiLive(opts: GeminiLiveOptions) {
-    opts.onLog("WS открывается...", { wsUrl: opts.wsUrl, hasVault: opts.vaultContext.length > 0 });
+    opts.onLog("WS открывается...", { wsUrl: opts.wsUrl, hasVault: opts.vaultContext.length > 0, hasTools: !!opts.capabilities?.voiceTools });
 
     if (!playbackCtx || playbackCtx.state === "closed") {
         playbackCtx = new AudioContext({ sampleRate: 24000 });
@@ -135,8 +231,10 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
 
     ws.onopen = () => {
         const systemText = buildSystemInstruction(opts.vaultContext);
-        opts.onLog("WS подключён, отправляю setup", { systemLen: systemText.length });
-        ws!.send(JSON.stringify({
+        const tools = buildTools(opts.capabilities);
+        opts.onLog("WS подключён, отправляю setup", { systemLen: systemText.length, toolCount: tools?.[0]?.functionDeclarations?.length ?? 0 });
+
+        const setupMsg: Record<string, unknown> = {
             setup: {
                 model: "models/gemini-2.5-flash-native-audio-latest",
                 generation_config: {
@@ -151,8 +249,10 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
                 },
                 input_audio_transcription: {},
                 output_audio_transcription: {},
+                ...(tools ? { tools } : {}),
             },
-        }));
+        };
+        ws!.send(JSON.stringify(setupMsg));
     };
 
     let userTranscript = "";
@@ -241,6 +341,49 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
             }
             userTranscript = "";
             assistantTranscript = "";
+        }
+
+        // ── Function Calling: toolCall from Gemini ──
+        const toolCall = data.toolCall as { functionCalls?: Array<{ name: string; id: string; args: Record<string, unknown> }> } | undefined;
+        if (toolCall?.functionCalls) {
+            opts.onOrbState("thinking");
+            opts.onLog("toolCall received", { calls: toolCall.functionCalls.map(c => c.name) });
+
+            const responses = await Promise.all(
+                toolCall.functionCalls.map(async (call) => {
+                    try {
+                        const res = await fetch("/api/gemini-tool-exec", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ tool: call.name, args: call.args }),
+                        });
+                        const data = await res.json() as { result: unknown };
+                        opts.onLog(`toolCall ${call.name} completed`, data.result);
+                        return {
+                            name: call.name,
+                            id: call.id,
+                            response: { result: data.result },
+                        };
+                    } catch (err) {
+                        opts.onLog(`toolCall ${call.name} failed`, err);
+                        return {
+                            name: call.name,
+                            id: call.id,
+                            response: { error: `Tool execution failed: ${err instanceof Error ? err.message : String(err)}` },
+                        };
+                    }
+                })
+            );
+
+            // Send tool responses back to Gemini
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    toolResponse: {
+                        functionResponses: responses,
+                    },
+                }));
+                opts.onLog("toolResponse sent", { count: responses.length });
+            }
         }
     };
 

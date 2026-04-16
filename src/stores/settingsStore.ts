@@ -88,6 +88,12 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                 litellmModel: "gpt-4o",
                 useHybridSearch: false,
                 useDeepAgent: false,
+                // Voice Capabilities (Gemini Live Function Calling)
+                voiceTools: true,
+                voiceSearchKnowledge: true,
+                voiceSystemStatus: true,
+                voiceUrlAccess: true,
+                voiceTaskManagement: true,
 
                 toggleShowUsdTokens: () =>
                     set((s) => ({ showUsdTokens: !s.showUsdTokens })),
@@ -159,6 +165,11 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                 setLitellmModel: (model) => set({ litellmModel: model }),
                 toggleHybridSearch: () => set((s) => ({ useHybridSearch: !s.useHybridSearch })),
                 toggleDeepAgent: () => set((s) => ({ useDeepAgent: !s.useDeepAgent })),
+                toggleVoiceTools: () => set((s) => ({ voiceTools: !s.voiceTools })),
+                toggleVoiceSearchKnowledge: () => set((s) => ({ voiceSearchKnowledge: !s.voiceSearchKnowledge })),
+                toggleVoiceSystemStatus: () => set((s) => ({ voiceSystemStatus: !s.voiceSystemStatus })),
+                toggleVoiceUrlAccess: () => set((s) => ({ voiceUrlAccess: !s.voiceUrlAccess })),
+                toggleVoiceTaskManagement: () => set((s) => ({ voiceTaskManagement: !s.voiceTaskManagement })),
             }),
             {
                 name: "voicezettel-settings",
@@ -192,8 +203,13 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                     litellmModel: state.litellmModel,
                     useHybridSearch: state.useHybridSearch,
                     useDeepAgent: state.useDeepAgent,
+                    voiceTools: state.voiceTools,
+                    voiceSearchKnowledge: state.voiceSearchKnowledge,
+                    voiceSystemStatus: state.voiceSystemStatus,
+                    voiceUrlAccess: state.voiceUrlAccess,
+                    voiceTaskManagement: state.voiceTaskManagement,
                 }),
-                version: 18,
+                version: 19,
                 migrate: (persisted, version) => {
                     const state = persisted as Record<string, unknown>;
                     if (version < 2) {
@@ -267,6 +283,14 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                         if (state.ttsProvider === "edge") {
                             state.ttsProvider = "gemini";
                         }
+                    }
+                    if (version < 19) {
+                        // Voice Capabilities — all on by default
+                        state.voiceTools = state.voiceTools ?? true;
+                        state.voiceSearchKnowledge = state.voiceSearchKnowledge ?? true;
+                        state.voiceSystemStatus = state.voiceSystemStatus ?? true;
+                        state.voiceUrlAccess = state.voiceUrlAccess ?? true;
+                        state.voiceTaskManagement = state.voiceTaskManagement ?? true;
                     }
                     return state;
                 },
