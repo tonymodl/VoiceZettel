@@ -51,6 +51,7 @@ from exporter import TelegramExporter
 from obsidian_writer import ObsidianWriter
 from live_sync import LiveSync
 from export_tracker import ExportTracker
+from telethon.utils import get_display_name, get_peer_id
 
 logging.basicConfig(
     level=logging.INFO,
@@ -982,7 +983,8 @@ class SendMessageRequest(BaseModel):
 @app.post("/send")
 async def send_message(req: SendMessageRequest):
     """Send a message to a Telegram chat on behalf of the user.
-    Can resolve by chat_id or fuzzy chat_name search."""
+    Can resolve by chat_id or fuzzy chat_name search.
+    Uses multiple resolution strategies for reliability."""
     if not exporter._client or not exporter._client.is_connected():
         raise HTTPException(400, "Telegram не подключён")
 
@@ -994,42 +996,91 @@ async def send_message(req: SendMessageRequest):
         raise HTTPException(400, "Текст сообщения пуст")
 
     target_entity = None
+    # Normalize Unicode to NFC form (fixes Cyrillic matching issues)
+    import unicodedata
+    search_name = unicodedata.normalize("NFC", (req.chat_name or "").lower().strip())
 
-    # Resolve by chat_id
+    logger.info(f"Send request: chat_name='{req.chat_name}', chat_id={req.chat_id}, text='{req.text[:50]}', search_normalized='{search_name}'")
+
+    # Strategy 1: Resolve by chat_id (most reliable)
     if req.chat_id:
         try:
             target_entity = await exporter._client.get_entity(req.chat_id)
+            logger.info(f"Resolved by chat_id: {get_display_name(target_entity)}")
         except Exception as e:
             logger.warning(f"Cannot resolve chat_id {req.chat_id}: {e}")
 
-    # Resolve by name (fuzzy match)
-    if not target_entity and req.chat_name:
-        search_name = req.chat_name.lower().strip()
+    # Strategy 2: Fuzzy match in dialogs
+    if not target_entity and search_name:
         try:
-            all_dialogs = await exporter._client.get_dialogs(limit=200)
+            all_dialogs = await exporter._client.get_dialogs(limit=500)
+            logger.info(f"Searching {len(all_dialogs)} dialogs for '{search_name}'")
+
             best_match = None
             best_score = 0
+
             for dialog in all_dialogs:
-                name = get_display_name(dialog.entity).lower()
-                # Exact match
+                raw_name = get_display_name(dialog.entity)
+                name = unicodedata.normalize("NFC", raw_name.lower())
+
+                # Exact match — instant win
                 if name == search_name:
                     best_match = dialog.entity
+                    logger.info(f"Exact match: '{name}'")
                     break
-                # Partial match
-                if search_name in name or name in search_name:
-                    score = len(search_name) / max(len(name), 1)
+
+                # Full search_name is contained in dialog name
+                if search_name in name:
+                    score = len(search_name) / max(len(name), 1) + 0.5
                     if score > best_score:
                         best_score = score
                         best_match = dialog.entity
-            target_entity = best_match
+
+                # Dialog name is contained in search_name
+                elif name in search_name:
+                    score = len(name) / max(len(search_name), 1) + 0.3
+                    if score > best_score:
+                        best_score = score
+                        best_match = dialog.entity
+
+                # Word-level match: any word from search matches first/last name
+                else:
+                    search_words = search_name.split()
+                    name_words = name.split()
+                    matching_words = sum(1 for sw in search_words if any(sw in nw or nw in sw for nw in name_words))
+                    if matching_words > 0:
+                        score = matching_words / max(len(search_words), len(name_words)) * 0.8
+                        if score > best_score:
+                            best_score = score
+                            best_match = dialog.entity
+
+            if best_match:
+                target_entity = best_match
+                logger.info(f"Fuzzy match (score {best_score:.2f}): '{get_display_name(target_entity)}'")
+            else:
+                logger.warning(f"No fuzzy match found for '{search_name}' in {len(all_dialogs)} dialogs")
         except Exception as e:
-            logger.warning(f"Chat name search failed: {e}")
+            logger.warning(f"Dialog search failed: {e}")
+
+    # Strategy 3: Telethon's built-in entity resolver (searches by username, phone, etc.)
+    if not target_entity and search_name:
+        try:
+            target_entity = await exporter._client.get_entity(search_name)
+            logger.info(f"Resolved by Telethon resolver: '{get_display_name(target_entity)}'")
+        except Exception as e:
+            logger.warning(f"Telethon resolver failed for '{search_name}': {e}")
 
     if not target_entity:
+        available_names = []
+        try:
+            dialogs = await exporter._client.get_dialogs(limit=20)
+            available_names = [get_display_name(d.entity) for d in dialogs[:10]]
+        except Exception:
+            pass
+        hint = f" Доступные чаты: {', '.join(available_names[:5])}" if available_names else ""
         raise HTTPException(
             404,
-            f"Чат не найден: {req.chat_name or req.chat_id}. "
-            "Укажите точное имя контакта или ID чата."
+            f"Чат не найден: {req.chat_name or req.chat_id}.{hint}"
         )
 
     try:
