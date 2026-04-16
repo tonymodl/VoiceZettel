@@ -10,8 +10,9 @@ const PROVIDERS = [
 ];
 
 const TTS_PROVIDERS = [
-    { key: "openai" as const, label: "OpenAI TTS", notif: "Озвучка: OpenAI — перезапустите сессию" },
+    { key: "gemini" as const, label: "Google TTS", notif: "Озвучка: Google Gemini — лучшие голоса ✨" },
     { key: "edge" as const, label: "Edge TTS", notif: "Озвучка: Edge TTS — применится к следующему ответу" },
+    { key: "openai" as const, label: "OpenAI TTS", notif: "Озвучка: OpenAI — перезапустите сессию" },
 ];
 
 const VOICE_MODES = [

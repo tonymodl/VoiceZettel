@@ -26,6 +26,7 @@ import {
     prefetchLocalTTS,
     prefetchPiperTTS,
     prefetchQwenTTS,
+    prefetchGeminiTTS,
     cleanResponseText,
     getAudioLevel,
 } from "@/hooks/voiceHelpers";
@@ -344,13 +345,15 @@ export function useVoiceSession() {
                 clean = clean.trim();
                 console.log("[TTS] Sentence detected:", clean.slice(0, 50), "length:", clean.length);
                 if (clean.length < 1) return;
-                const blobPromise = ttsProvider === "local"
-                    ? prefetchLocalTTS(clean, localTtsVoice)
-                    : ttsProvider === "piper"
-                        ? prefetchPiperTTS(clean)
-                        : ttsProvider === "qwen"
-                            ? prefetchQwenTTS(clean)
-                            : prefetchEdgeTTS(clean, edgeTtsVoice);
+                const blobPromise = ttsProvider === "gemini"
+                    ? prefetchGeminiTTS(clean)
+                    : ttsProvider === "local"
+                        ? prefetchLocalTTS(clean, localTtsVoice)
+                        : ttsProvider === "piper"
+                            ? prefetchPiperTTS(clean)
+                            : ttsProvider === "qwen"
+                                ? prefetchQwenTTS(clean)
+                                : prefetchEdgeTTS(clean, edgeTtsVoice);
                 queue.push({ text: clean, blobPromise });
             });
             console.log("[TTS] Stream finished, raw response length:", rawResponse.length);

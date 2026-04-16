@@ -271,6 +271,45 @@ export async function prefetchQwenTTS(text: string): Promise<Blob | null> {
 }
 
 /**
+ * Pre-fetch Gemini TTS audio for a sentence.
+ * Uses Google's Gemini API with the same high-quality voices as Gemini Live.
+ * Retries up to 2 times with 500ms delay.
+ */
+export async function prefetchGeminiTTS(
+    text: string,
+    voice: string = "Aoede",
+): Promise<Blob | null> {
+    const clean = normalizeTextForTTS(text);
+    if (!clean || clean.length < 1) return null;
+    console.log("[TTS-Gemini] Fetching audio for:", clean.slice(0, 50), "voice:", voice);
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+            const res = await fetch("/api/tts-gemini", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: clean, voice }),
+            });
+            if (!res.ok) {
+                console.error(`[TTS-Gemini] Attempt ${attempt}: error:`, res.status);
+                if (attempt < 2) await new Promise(r => setTimeout(r, 500));
+                continue;
+            }
+            const blob = await res.blob();
+            if (blob.size > 0) {
+                console.log("[TTS-Gemini] Got audio blob:", blob.size, "bytes");
+                return blob;
+            }
+            console.warn(`[TTS-Gemini] Attempt ${attempt}: got empty blob`);
+            if (attempt < 2) await new Promise(r => setTimeout(r, 500));
+        } catch (err) {
+            console.error(`[TTS-Gemini] Attempt ${attempt} error:`, err);
+            if (attempt < 2) await new Promise(r => setTimeout(r, 500));
+        }
+    }
+    return null;
+}
+
+/**
  * Clean assistant response text: strip DSML, counter tags, preferences, JSON artifacts.
  */
 export function cleanResponseText(raw: string): string {

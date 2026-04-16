@@ -73,7 +73,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
 > *Краткая цитата или описание контекста, в котором мысль всплыла в разговоре.*`,
                 aiProvider: "openai",
                 aiVoiceEnabled: true,
-                ttsProvider: "edge",
+                ttsProvider: "gemini",
                 edgeTtsVoice: "ru-RU-SvetlanaNeural",
                 localTtsVoice: "kseniya",
                 piperTtsVoice: "ruslan",
@@ -193,7 +193,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                     useHybridSearch: state.useHybridSearch,
                     useDeepAgent: state.useDeepAgent,
                 }),
-                version: 17,
+                version: 18,
                 migrate: (persisted, version) => {
                     const state = persisted as Record<string, unknown>;
                     if (version < 2) {
@@ -261,6 +261,12 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                         state.litellmModel = state.litellmModel ?? "gpt-4o";
                         state.useHybridSearch = state.useHybridSearch ?? false;
                         state.useDeepAgent = state.useDeepAgent ?? false;
+                    }
+                    if (version < 18) {
+                        // Upgrade TTS to Gemini for best Google voice quality
+                        if (state.ttsProvider === "edge") {
+                            state.ttsProvider = "gemini";
+                        }
                     }
                     return state;
                 },
