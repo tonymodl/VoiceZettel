@@ -356,13 +356,23 @@ export function DashboardTab() {
             });
         }
 
-        // ── V3.0 Services ─────────────────────────────────────
+        // ── V3.0 Services (OpenClaw — single fetch, 3 cards) ──────
 
-        // 8) OpenClaw Agent
+        // 8–9–13) Fetch OpenClaw status ONCE, reuse for Agent + Shadow Mode + NLP cards
+        let openClawData: OpenClawStatus | null = null;
+        let openClawLatency: number | null = null;
         try {
             const { data, latency } = await fetchWithTimeout("/api/openclaw/status", 4000);
-            const d = data as OpenClawStatus;
-            setOpenclawStatus(d);
+            openClawData = data as OpenClawStatus;
+            openClawLatency = latency;
+            setOpenclawStatus(openClawData);
+        } catch {
+            setOpenclawStatus(null);
+        }
+
+        // 8) OpenClaw Agent card
+        if (openClawData) {
+            const d = openClawData;
             const configured = d.configured;
             const hasData = d.raw_files > 0 || d.wiki_pages > 0;
             results.push({
@@ -370,7 +380,7 @@ export function DashboardTab() {
                 nameRu: "OpenClaw (Wiki)",
                 icon: <Brain className={`size-4 ${configured ? "text-fuchsia-400" : "text-zinc-500"}`} />,
                 status: configured ? (hasData ? "online" : "degraded") : "degraded",
-                latency,
+                latency: openClawLatency,
                 details: configured
                     ? `Raw: ${d.raw_files} | Wiki: ${d.wiki_pages} | People: ${d.entities.people} | Tasks: ${d.entities.tasks}`
                     : "Не настроен",
@@ -381,8 +391,7 @@ export function DashboardTab() {
                     : "⚠️ OpenClaw не настроен. Запустите: bash scripts/setup-openclaw.sh",
                 badge: "LLM",
             });
-        } catch {
-            setOpenclawStatus(null);
+        } else {
             results.push({
                 name: "OpenClaw Agent",
                 nameRu: "OpenClaw (Wiki)",
@@ -395,10 +404,9 @@ export function DashboardTab() {
             });
         }
 
-        // 9) Shadow Mode (Raw_v2 / Wiki_v2)
-        try {
-            const { data } = await fetchWithTimeout("/api/openclaw/status", 3000);
-            const d = data as OpenClawStatus;
+        // 9) Shadow Mode card (reuses openClawData)
+        if (openClawData) {
+            const d = openClawData;
             const bothExist = d.directories.raw_v2 && d.directories.wiki_v2;
             results.push({
                 name: "Shadow Mode",
@@ -412,7 +420,7 @@ export function DashboardTab() {
                     : "⚠️ Директории Shadow Mode не найдены. Создайте: VoiceZettel/Raw_v2/ и VoiceZettel/Wiki_v2/",
                 badge: "v2",
             });
-        } catch {
+        } else {
             results.push({
                 name: "Shadow Mode",
                 nameRu: "Shadow Mode",
@@ -517,10 +525,9 @@ export function DashboardTab() {
             });
         }
 
-        // 13) NLP Pipeline (entity extraction status)
-        try {
-            const { data } = await fetchWithTimeout("/api/openclaw/status", 3000);
-            const d = data as OpenClawStatus & { heartbeat?: { active: boolean; last_run: string | null } };
+        // 13) NLP Pipeline (entity extraction status — reuses openClawData)
+        if (openClawData) {
+            const d = openClawData;
             const totalEntities = d.entities.people + d.entities.tasks;
             const hasEntities = totalEntities > 0;
             results.push({
@@ -535,7 +542,7 @@ export function DashboardTab() {
                     : "⚠️ NLP конвейер настроен, но сущности ещё не извлечены. Добавьте файлы в Raw_v2/ и запустите Heartbeat.",
                 badge: "NLP",
             });
-        } catch {
+        } else {
             results.push({
                 name: "NLP Pipeline",
                 nameRu: "NLP конвейер",

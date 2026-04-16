@@ -85,6 +85,7 @@ export function InputBar() {
     const [text, setText] = useState("");
     const [menuOpen, setMenuOpen] = useState(false);
     const [attachments, setAttachments] = useState<AttachedFile[]>([]);
+    const [isSending, setIsSending] = useState(false);
     const { sendMessage } = useTextChat();
     const menuRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -106,8 +107,10 @@ export function InputBar() {
     }, [menuOpen]);
 
     const handleSend = useCallback(async () => {
+        if (isSending) return; // Guard against double-send
         const trimmed = text.trim();
         if (!trimmed && attachments.length === 0) return;
+        setIsSending(true);
         warmUpAudio();
 
         if (attachments.length > 0) {
@@ -149,7 +152,8 @@ export function InputBar() {
 
         setText("");
         setAttachments([]);
-    }, [text, attachments, sendMessage]);
+        setIsSending(false);
+    }, [text, attachments, sendMessage, isSending]);
 
     const handleSubmit = useCallback(
         (e: FormEvent) => {
@@ -258,7 +262,7 @@ export function InputBar() {
             <div className="flex w-full items-center gap-2">
                 {/* Text input */}
                 <Input
-                    placeholder="Task…"
+                    placeholder="Сообщение…"
                     className="flex-1 border-white/10 bg-white/5 placeholder:text-zinc-600 focus-visible:border-violet-500/50 focus-visible:ring-violet-500/20"
                     value={text}
                     onChange={(e) => setText(e.target.value)}
@@ -340,7 +344,7 @@ export function InputBar() {
                     size="icon-sm"
                     className="shrink-0 bg-violet-600 text-white hover:bg-violet-500"
                     aria-label="Send message"
-                    disabled={!text.trim() && attachments.length === 0}
+                    disabled={isSending || (!text.trim() && attachments.length === 0)}
                 >
                     <SendHorizontal className="size-4" />
                 </Button>

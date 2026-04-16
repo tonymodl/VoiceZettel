@@ -81,6 +81,8 @@ export function useTextChat() {
             });
 
             // 6. Stream response
+            // Cancel any in-flight request before starting a new one
+            abortRef.current?.abort();
             abortRef.current = new AbortController();
 
             try {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence, type PanInfo } from "framer-motion";
 import { ParticleOrb } from "@/components/orb/ParticleOrb";
 import { LavalierOrb } from "@/components/orb/LavalierOrb";
@@ -40,6 +40,7 @@ export function OrbArea() {
     const [showSummary, setShowSummary] = useState(false);
     const [showHint, setShowHint] = useState(true);
     const [slideDir, setSlideDir] = useState<1 | -1>(1);
+    const isConnectingRef = useRef(false);
 
     // Auto-hide hint after 4 seconds
     useEffect(() => {
@@ -55,15 +56,16 @@ export function OrbArea() {
             interruptSpeaking();
             return;
         }
+        if (isConnectingRef.current) return; // Guard against double-connect
         if (isVoiceActive) {
             stopVoice();
+            isConnectingRef.current = false;
         } else {
             // Antigravity Phase 1: Optimistic UI — instant visual + audio feedback
-            // Orb turns cyan IMMEDIATELY, before any async network operations.
-            // If startVoice() fails, its catch block will reset to 'idle'.
+            isConnectingRef.current = true;
             useChatStore.getState().setOrbState("listening");
             try { playSound("crystal_chime"); } catch { /* non-critical */ }
-            startVoice();
+            startVoice().finally(() => { isConnectingRef.current = false; });
         }
     }, [isVoiceActive, startVoice, stopVoice, interruptSpeaking, orbState]);
 
@@ -148,7 +150,7 @@ export function OrbArea() {
                                     )}
                                 </AnimatePresence>
 
-                                <span className="-mt-5 text-xs tracking-wide text-zinc-500">
+                                <span className="-mt-5 text-xs tracking-wide text-zinc-500" aria-live="polite">
                                     {STATE_LABELS[orbState]}
                                 </span>
                             </div>
@@ -191,7 +193,7 @@ export function OrbArea() {
                             key={m}
                             type="button"
                             onClick={() => goToMode(m)}
-                            className={`size-1.5 rounded-full transition-all ${mode === m
+                            className={`size-3 rounded-full p-0 transition-all ${mode === m
                                 ? "scale-125 bg-violet-500"
                                 : "bg-zinc-600 hover:bg-zinc-500"
                                 }`}

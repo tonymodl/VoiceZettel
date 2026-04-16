@@ -154,6 +154,22 @@ export function SettingsPanel({ open, onClose, initialSection }: SettingsPanelPr
         }
     }, [open, notesGoToList]);
 
+    // Close on Escape key
+    useEffect(() => {
+        if (!open) return;
+        const handler = (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+                if (activeSection) {
+                    setActiveSection(null);
+                } else {
+                    onClose();
+                }
+            }
+        };
+        document.addEventListener("keydown", handler);
+        return () => document.removeEventListener("keydown", handler);
+    }, [open, activeSection, onClose]);
+
     const handleOpenSection = (id: SettingsSectionId) => {
         setActiveSection(id);
     };
