@@ -58,16 +58,27 @@ export interface UpdateNotePayload {
 }
 
 // ── Sync source types ─────────────────────────────
-export type SyncSourceId = "zettelkasten" | "telegram" | "voice_sessions" | "obsidian";
+/** Dynamic sync source id — can be any vault folder or built-in source */
+export type SyncSourceId = string;
 
-export const SYNC_SOURCE_LABELS: Record<SyncSourceId, string> = {
+/** Vault folder discovered from Obsidian */
+export interface VaultFolder {
+    id: string;
+    name: string;
+    path: string;
+    description: string;
+    noteCount: number;
+}
+
+/** Static fallback labels for known sources */
+export const SYNC_SOURCE_LABELS: Record<string, string> = {
     zettelkasten: "Zettelkasten заметки",
     telegram: "Архив переписок Telegram",
     voice_sessions: "Сессии голосового ассистента",
     obsidian: "Obsidian Vault",
 };
 
-export const SYNC_SOURCE_DESCRIPTIONS: Record<SyncSourceId, string> = {
+export const SYNC_SOURCE_DESCRIPTIONS: Record<string, string> = {
     zettelkasten: "Автоматически созданные заметки по методу Zettelkasten",
     telegram: "Экспортированные сообщения и чаты из Telegram",
     voice_sessions: "Все транскрипции и сессии голосового ассистента",

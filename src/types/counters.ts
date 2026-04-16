@@ -42,14 +42,10 @@ export interface CustomWidget {
 }
 
 // ── Sync Sources ────────────────────────────────────────────
-export type SyncSourceId = "zettelkasten" | "telegram" | "voice_sessions" | "obsidian";
+export type SyncSourceId = string;
 
-export interface SyncSources {
-    zettelkasten: boolean;
-    telegram: boolean;
-    voice_sessions: boolean;
-    obsidian: boolean;
-}
+/** Dynamic map of source id → enabled/disabled */
+export type SyncSources = Record<string, boolean>;
 
 // ── Settings store types ────────────────────────────────────
 export type AiProvider = "openai" | "google" | "deepseek";

@@ -2,13 +2,13 @@
 
 import { useEffect, useCallback, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Search, FileText, Pencil, ChevronDown, CloudOff, LayoutList, LayoutGrid, Settings2 } from "lucide-react";
+import { X, Search, FileText, Pencil, ChevronDown, CloudOff, LayoutList, LayoutGrid, Settings2, Loader2 } from "lucide-react";
 import { NoteCard } from "@/components/notes/NoteCard";
 import { useNotesStore } from "@/stores/notesStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useUser } from "@/components/providers/UserProvider";
 import { NOTE_CATEGORIES, CATEGORY_LABELS, SYNC_SOURCE_LABELS, SYNC_SOURCE_DESCRIPTIONS } from "@/types/notes";
-import type { NoteCategory } from "@/types/notes";
+import type { NoteCategory, VaultFolder } from "@/types/notes";
 import type { SyncSourceId } from "@/types/counters";
 import { Switch } from "@/components/ui/switch";
 
@@ -34,10 +34,25 @@ export function NotesList({ onClose, embedded }: NotesListProps) {
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const [viewMode, setViewMode] = useState<"list" | "grid">("list");
     const [showSyncSources, setShowSyncSources] = useState(false);
+    const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
+    const [foldersLoading, setFoldersLoading] = useState(false);
     const lastScrollY = useRef(0);
     const scrollRef = useRef<HTMLDivElement>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
+
+    // Fetch vault folders when sync sources panel opens
+    useEffect(() => {
+        if (!showSyncSources) return;
+        setFoldersLoading(true);
+        fetch("/api/obsidian/folders")
+            .then((r) => r.json())
+            .then((data: { folders?: VaultFolder[] }) => {
+                if (data.folders) setVaultFolders(data.folders);
+            })
+            .catch(() => {/* use static fallback */})
+            .finally(() => setFoldersLoading(false));
+    }, [showSyncSources]);
 
     // Build filter options: built-in + custom widgets
     const FILTER_OPTIONS: Array<{ key: NoteCategory | null; label: string }> = [
@@ -179,7 +194,7 @@ export function NotesList({ onClose, embedded }: NotesListProps) {
 
                         {/* Sync sources panel (collapsible) */}
                         <AnimatePresence>
-                            {showSyncSources && (
+                        {showSyncSources && (
                                 <motion.div
                                     initial={{ opacity: 0, height: 0 }}
                                     animate={{ opacity: 1, height: "auto" }}
@@ -190,20 +205,43 @@ export function NotesList({ onClose, embedded }: NotesListProps) {
                                         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                                             Источники заметок
                                         </p>
-                                        <div className="space-y-2">
-                                            {(Object.keys(SYNC_SOURCE_LABELS) as SyncSourceId[]).map((sourceId) => (
-                                                <div key={sourceId} className="flex items-center justify-between">
-                                                    <div>
-                                                        <span className="text-xs text-zinc-300">{SYNC_SOURCE_LABELS[sourceId]}</span>
-                                                        <p className="text-[10px] text-zinc-600">{SYNC_SOURCE_DESCRIPTIONS[sourceId]}</p>
-                                                    </div>
-                                                    <Switch
-                                                        checked={syncSources[sourceId]}
-                                                        onCheckedChange={() => toggleSyncSource(sourceId)}
-                                                    />
-                                                </div>
-                                            ))}
-                                        </div>
+                                        {foldersLoading ? (
+                                            <div className="flex items-center gap-2 py-3">
+                                                <Loader2 className="size-4 animate-spin text-violet-400" />
+                                                <span className="text-xs text-zinc-500">Загрузка папок из Obsidian...</span>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {/* Dynamic vault folders from API */}
+                                                {vaultFolders.length > 0
+                                                    ? vaultFolders.map((folder) => (
+                                                        <div key={folder.id} className="flex items-center justify-between">
+                                                            <div>
+                                                                <span className="text-xs text-zinc-300">{folder.name}</span>
+                                                                <p className="text-[10px] text-zinc-600">{folder.description}</p>
+                                                            </div>
+                                                            <Switch
+                                                                checked={syncSources[folder.id] ?? false}
+                                                                onCheckedChange={() => toggleSyncSource(folder.id as SyncSourceId)}
+                                                            />
+                                                        </div>
+                                                    ))
+                                                    : /* Static fallback when API is unavailable */
+                                                    (Object.keys(SYNC_SOURCE_LABELS) as SyncSourceId[]).map((sourceId) => (
+                                                        <div key={sourceId} className="flex items-center justify-between">
+                                                            <div>
+                                                                <span className="text-xs text-zinc-300">{SYNC_SOURCE_LABELS[sourceId]}</span>
+                                                                <p className="text-[10px] text-zinc-600">{SYNC_SOURCE_DESCRIPTIONS[sourceId]}</p>
+                                                            </div>
+                                                            <Switch
+                                                                checked={syncSources[sourceId] ?? false}
+                                                                onCheckedChange={() => toggleSyncSource(sourceId)}
+                                                            />
+                                                        </div>
+                                                    ))
+                                                }
+                                            </div>
+                                        )}
                                     </div>
                                 </motion.div>
                             )}
