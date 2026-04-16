@@ -18,6 +18,7 @@ import { useUser } from "@/components/providers/UserProvider";
 import { logger } from "@/lib/logger";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { useChatStream } from "@/hooks/useChatStream";
+import { readPrewarmCache } from "@/hooks/usePrewarmer";
 import {
     type SentenceJob,
     AsyncQueue,
@@ -473,70 +474,99 @@ export function useVoiceSession() {
 
         const voiceMode = useSettingsStore.getState().voiceMode;
 
+        // Antigravity: read pre-warmed cache (mic, tokens, local core status)
+        const prewarmCache = readPrewarmCache();
+        const cacheAgeMs = Date.now() - prewarmCache.timestamp;
+        const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
+        const cacheValid = prewarmCache.timestamp > 0 && cacheAgeMs < CACHE_MAX_AGE;
+        if (cacheValid) {
+            logger.info(`[Antigravity] Using pre-warmed cache (age: ${(cacheAgeMs / 1000).toFixed(1)}s)`);
+        }
+
         // ── Gemini Live: self-contained Speech-to-Speech via WebSocket ──
         if (voiceMode === "gemini-live") {
             setModality("voice");
             setOrbState("listening");
 
-            // Шаг 1: запрос микрофона — ПЕРВЫМ, пока жив контекст жеста
+            // Antigravity: Шаг 1 — reuse cached mic stream if available, otherwise request fresh
             let micStream: MediaStream;
-            try {
-                micStream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        sampleRate: 16000,
-                    },
-                });
-            } catch (err) {
-                useNotificationStore.getState().addNotification(
-                    "Ошибка микрофона: " + (err instanceof Error ? err.message : String(err)),
-                    "error",
-                );
-                setOrbState("idle");
-                setModality("text");
-                isStartingRef.current = false;
-                return;
-            }
-
-            // Шаг 2: получить wsUrl и сжатый контекст заметок с сервера
-            let wsUrl: string;
-            let vaultContext = "";
-            try {
-                const res = await fetch("/api/gemini-live-token", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ userId }),
-                });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const json = await res.json() as {
-                    wsUrl?: string;
-                    vaultContext?: string;
-                    disabled?: boolean;
-                    reason?: string;
-                };
-                if (json.disabled) {
-                    micStream.getTracks().forEach((t) => t.stop());
+            let micFromCache = false;
+            if (cacheValid && prewarmCache.micStream && prewarmCache.micStream.active) {
+                micStream = prewarmCache.micStream;
+                // Activate phantom tracks — they were disabled during pre-warm
+                micStream.getTracks().forEach(t => { t.enabled = true; });
+                micFromCache = true;
+                logger.info("[Antigravity] Reusing pre-warmed mic stream (0ms)");
+            } else {
+                try {
+                    micStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            sampleRate: 16000,
+                        },
+                    });
+                } catch (err) {
                     useNotificationStore.getState().addNotification(
-                        json.reason ?? "Gemini Live не активен — добавьте GOOGLE_GEMINI_API_KEY в .env", "info",
+                        "Ошибка микрофона: " + (err instanceof Error ? err.message : String(err)),
+                        "error",
                     );
                     setOrbState("idle");
                     setModality("text");
                     isStartingRef.current = false;
                     return;
                 }
-                wsUrl = json.wsUrl!;
-                vaultContext = json.vaultContext ?? "";
-            } catch (err) {
-                micStream.getTracks().forEach((t) => t.stop());
-                useNotificationStore.getState().addNotification(
-                    "Gemini Live: ошибка токена", "error",
-                );
-                setOrbState("idle");
-                setModality("text");
-                isStartingRef.current = false;
-                return;
             }
+
+            // Antigravity: Шаг 2 — reuse cached Gemini token if available, otherwise fetch
+            let wsUrl: string;
+            let vaultContext = "";
+            if (cacheValid && prewarmCache.geminiToken) {
+                wsUrl = prewarmCache.geminiToken.wsUrl;
+                vaultContext = prewarmCache.geminiToken.vaultContext;
+                logger.info("[Antigravity] Reusing pre-warmed Gemini token (0ms)");
+            } else {
+                try {
+                    const res = await fetch("/api/gemini-live-token", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ userId }),
+                    });
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const json = await res.json() as {
+                        wsUrl?: string;
+                        vaultContext?: string;
+                        disabled?: boolean;
+                        reason?: string;
+                    };
+                    if (json.disabled) {
+                        if (!micFromCache) micStream.getTracks().forEach((t) => t.stop());
+                        useNotificationStore.getState().addNotification(
+                            json.reason ?? "Gemini Live не активен — добавьте GOOGLE_GEMINI_API_KEY в .env", "info",
+                        );
+                        setOrbState("idle");
+                        setModality("text");
+                        isStartingRef.current = false;
+                        return;
+                    }
+                    wsUrl = json.wsUrl!;
+                    vaultContext = json.vaultContext ?? "";
+                } catch (err) {
+                    if (!micFromCache) micStream.getTracks().forEach((t) => t.stop());
+                    useNotificationStore.getState().addNotification(
+                        "Gemini Live: ошибка токена", "error",
+                    );
+                    setOrbState("idle");
+                    setModality("text");
+                    isStartingRef.current = false;
+                    return;
+                }
+            }
+
+            // Antigravity: Invalidate consumed cache entries
+            // (mic is now in use, token is consumed — prevent double-use)
+            if (micFromCache) prewarmCache.micStream = null;
+            prewarmCache.geminiToken = null;
 
             // Шаг 3: запустить WebSocket с готовым stream
             const { connectGeminiLive, disconnectGeminiLive } =
@@ -637,8 +667,14 @@ export function useVoiceSession() {
             }
             sttKind = "browser";
         } else {
-            // "cloud" or "local" — try Local Core first, fallback to browser
-            const localOk = await LocalVoiceClient.isAvailable();
+            // Antigravity: use cached localCoreAvailable if available (saves 200-2000ms RTT)
+            let localOk: boolean;
+            if (cacheValid && prewarmCache.localCoreAvailable !== null) {
+                localOk = prewarmCache.localCoreAvailable;
+                logger.info(`[Antigravity] Using cached Local Core status: ${localOk} (0ms)`);
+            } else {
+                localOk = await LocalVoiceClient.isAvailable();
+            }
             if (localOk) {
                 sttKind = "local";
             } else if (BrowserSttClient.isAvailable()) {
