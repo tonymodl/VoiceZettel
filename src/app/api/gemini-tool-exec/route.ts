@@ -1,7 +1,7 @@
 /**
  * @module /api/gemini-tool-exec
  * Executes tool calls from Gemini Live WebSocket.
- * Supports: search_knowledge, get_system_status, browse_url, save_memory
+ * Supports: search_knowledge, get_system_status, browse_url, save_memory, send_telegram
  */
 import { NextRequest, NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
@@ -10,6 +10,7 @@ import { saveMemory } from "@/lib/memoryStore";
 const INDEXER_URL = process.env.INDEXER_SERVICE_URL ?? "http://127.0.0.1:8030";
 const OBSIDIAN_URL = process.env.OBSIDIAN_API_URL ?? "http://127.0.0.1:27123";
 const OBSIDIAN_KEY = process.env.OBSIDIAN_API_KEY ?? "";
+const TELEGRAM_URL = process.env.TELEGRAM_SERVICE_URL ?? "http://127.0.0.1:8035";
 
 interface ToolExecRequest {
     tool: string;
@@ -115,12 +116,14 @@ export async function POST(req: NextRequest) {
                         signal: AbortSignal.timeout(1500),
                     }).then(r => ({ status: r.ok ? "ok" : "error", code: r.status })),
                     fetch("http://127.0.0.1:3000/api/health", { signal: AbortSignal.timeout(1500) }).then(r => r.json()),
+                    fetch(`${TELEGRAM_URL}/health`, { signal: AbortSignal.timeout(1500) }).then(r => r.json()),
                 ]);
 
                 statuses.indexer = checks[0].status === "fulfilled" ? checks[0].value : { status: "offline" };
                 statuses.indexer_stats = checks[1].status === "fulfilled" ? checks[1].value : { status: "offline" };
                 statuses.obsidian = checks[2].status === "fulfilled" ? checks[2].value : { status: "offline" };
                 statuses.voicezettel = checks[3].status === "fulfilled" ? checks[3].value : { status: "offline" };
+                statuses.telegram = checks[4].status === "fulfilled" ? checks[4].value : { status: "offline" };
 
                 result = statuses;
                 break;
@@ -201,6 +204,48 @@ export async function POST(req: NextRequest) {
                     result = { created: res.ok, path: notePath };
                 } catch {
                     result = { error: "Obsidian not available" };
+                }
+                break;
+            }
+
+            case "send_telegram": {
+                const chatName = String(args.chat_name ?? "");
+                const text = String(args.text ?? "");
+                const chatId = args.chat_id as number | undefined;
+
+                if (!text) {
+                    result = { error: "Текст сообщения обязателен" };
+                    break;
+                }
+                if (!chatName && !chatId) {
+                    result = { error: "Укажите имя контакта (chat_name) или ID чата" };
+                    break;
+                }
+
+                try {
+                    const res = await fetch(`${TELEGRAM_URL}/send`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            chat_name: chatName || null,
+                            chat_id: chatId || null,
+                            text,
+                        }),
+                        signal: AbortSignal.timeout(5000),
+                    });
+                    if (res.ok) {
+                        const data = await res.json() as { chat_name: string; message_id: number };
+                        result = {
+                            sent: true,
+                            recipient: data.chat_name,
+                            message_id: data.message_id,
+                        };
+                    } else {
+                        const errBody = await res.json().catch(() => ({ detail: res.statusText })) as { detail?: string };
+                        result = { error: errBody.detail ?? `Ошибка ${res.status}` };
+                    }
+                } catch (err) {
+                    result = { error: `Telegram сервис недоступен: ${err instanceof Error ? err.message : String(err)}` };
                 }
                 break;
             }

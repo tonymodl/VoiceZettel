@@ -970,6 +970,83 @@ async def sync_clear_messages():
     return {"status": "cleared"}
 
 
+# ── Send Message (VoiceZettel) ─────────────────────────────────
+
+class SendMessageRequest(BaseModel):
+    """Send a message to a Telegram chat."""
+    chat_id: Optional[int] = None
+    chat_name: Optional[str] = None  # fuzzy search by name
+    text: str
+
+
+@app.post("/send")
+async def send_message(req: SendMessageRequest):
+    """Send a message to a Telegram chat on behalf of the user.
+    Can resolve by chat_id or fuzzy chat_name search."""
+    if not exporter._client or not exporter._client.is_connected():
+        raise HTTPException(400, "Telegram не подключён")
+
+    auth = await exporter.get_auth_status()
+    if auth.get("status") != "authorized":
+        raise HTTPException(400, "Telegram не авторизован")
+
+    if not req.text or not req.text.strip():
+        raise HTTPException(400, "Текст сообщения пуст")
+
+    target_entity = None
+
+    # Resolve by chat_id
+    if req.chat_id:
+        try:
+            target_entity = await exporter._client.get_entity(req.chat_id)
+        except Exception as e:
+            logger.warning(f"Cannot resolve chat_id {req.chat_id}: {e}")
+
+    # Resolve by name (fuzzy match)
+    if not target_entity and req.chat_name:
+        search_name = req.chat_name.lower().strip()
+        try:
+            all_dialogs = await exporter._client.get_dialogs(limit=200)
+            best_match = None
+            best_score = 0
+            for dialog in all_dialogs:
+                name = get_display_name(dialog.entity).lower()
+                # Exact match
+                if name == search_name:
+                    best_match = dialog.entity
+                    break
+                # Partial match
+                if search_name in name or name in search_name:
+                    score = len(search_name) / max(len(name), 1)
+                    if score > best_score:
+                        best_score = score
+                        best_match = dialog.entity
+            target_entity = best_match
+        except Exception as e:
+            logger.warning(f"Chat name search failed: {e}")
+
+    if not target_entity:
+        raise HTTPException(
+            404,
+            f"Чат не найден: {req.chat_name or req.chat_id}. "
+            "Укажите точное имя контакта или ID чата."
+        )
+
+    try:
+        sent = await exporter._client.send_message(target_entity, req.text)
+        recipient_name = get_display_name(target_entity)
+        logger.info(f"Message sent to '{recipient_name}': {req.text[:50]}...")
+        return {
+            "status": "sent",
+            "chat_name": recipient_name,
+            "chat_id": get_peer_id(target_entity),
+            "message_id": sent.id,
+        }
+    except Exception as e:
+        logger.error(f"Send message failed: {e}")
+        raise HTTPException(500, f"Ошибка отправки: {e}")
+
+
 # ── Health ─────────────────────────────────────────────────────
 
 @app.get("/health")
