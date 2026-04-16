@@ -249,6 +249,45 @@ export async function POST(req: NextRequest) {
                 }
                 break;
             }
+            case "create_task": {
+                const title = String(args.title ?? "");
+                const description = String(args.description ?? "");
+                const priority = String(args.priority ?? "medium");
+                const assignee = String(args.assignee ?? "antigravity");
+
+                if (!title) {
+                    result = { error: "Title is required" };
+                    break;
+                }
+
+                try {
+                    // Create task via Tasks API
+                    const baseUrl = req.nextUrl.origin;
+                    const res = await fetch(`${baseUrl}/api/tasks`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ title, description, priority, assignee, userId }),
+                        signal: AbortSignal.timeout(5000),
+                    });
+
+                    if (res.ok) {
+                        const data = await res.json() as { task: { id: string; title: string; priority: string } };
+                        result = {
+                            created: true,
+                            task_id: data.task.id,
+                            title: data.task.title,
+                            priority: data.task.priority,
+                            message: `Задача "${title}" создана для ${assignee}.`,
+                        };
+                    } else {
+                        const errData = await res.json().catch(() => ({ error: "Unknown" })) as { error?: string };
+                        result = { error: errData.error ?? "Failed to create task" };
+                    }
+                } catch (err) {
+                    result = { error: `Task creation failed: ${err instanceof Error ? err.message : String(err)}` };
+                }
+                break;
+            }
 
             default:
                 result = { error: `Unknown tool: ${tool}` };

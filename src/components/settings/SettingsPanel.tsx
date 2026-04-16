@@ -13,6 +13,7 @@ import {
     FileText,
     ScrollText,
     ExternalLink,
+    ListChecks,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -26,11 +27,13 @@ import { ObsidianSection } from "./ObsidianSection";
 import { LiteLLMSection } from "./LiteLLMSection";
 import { LogsSection } from "./LogsSection";
 import { NotesSection } from "./NotesSection";
+import { VoiceTaskSidebar } from "@/components/tasks/VoiceTaskSidebar";
 import { useNotesStore } from "@/stores/notesStore";
 import type { SettingsSectionId, SettingsMenuItem } from "./types";
 
 const MENU_ITEMS: SettingsMenuItem[] = [
     { id: "notes", label: "Мои заметки", icon: FileText },
+    { id: "tasks", label: "Задачи", icon: ListChecks },
     { id: "widgets", label: "Виджеты", icon: LayoutGrid },
     { id: "ai", label: "Настройки ИИ", icon: Sparkles },
     { id: "agents", label: "Агенты", icon: Bot },
@@ -41,6 +44,7 @@ const MENU_ITEMS: SettingsMenuItem[] = [
 
 const SECTION_TITLES: Record<SettingsSectionId, string> = {
     notes: "Мои заметки",
+    tasks: "Задачи",
     widgets: "Виджеты",
     ai: "Настройки ИИ",
     agents: "Агенты",
@@ -83,6 +87,8 @@ function SectionContent({ id }: { id: SettingsSectionId }) {
     switch (id) {
         case "notes":
             return <NotesSection />;
+        case "tasks":
+            return <VoiceTaskSidebar userId="anton" />;
         case "widgets":
             return <WidgetsSection />;
         case "ai":
@@ -302,7 +308,7 @@ export function SettingsPanel({ open, onClose, initialSection }: SettingsPanelPr
                                 </div>
 
                                 {/* Section content */}
-                                {activeSection === "notes" ? (
+                                {activeSection === "notes" || activeSection === "tasks" ? (
                                     <div className="flex flex-1 flex-col overflow-hidden">
                                         <SectionContent id={activeSection} />
                                     </div>
