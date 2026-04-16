@@ -83,6 +83,11 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                 lavMode: false,
                 widgetEffects: [],
                 prewarmTimeoutMinutes: 5,
+                // Phase 2: Shadow Integration — all off by default
+                useLiteLLM: false,
+                litellmModel: "gpt-4o",
+                useHybridSearch: false,
+                useDeepAgent: false,
 
                 toggleShowUsdTokens: () =>
                     set((s) => ({ showUsdTokens: !s.showUsdTokens })),
@@ -150,6 +155,10 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                         return { widgetEffects: [...existing, config] };
                     }),
                 setPrewarmTimeoutMinutes: (minutes) => set({ prewarmTimeoutMinutes: minutes }),
+                toggleUseLiteLLM: () => set((s) => ({ useLiteLLM: !s.useLiteLLM })),
+                setLitellmModel: (model) => set({ litellmModel: model }),
+                toggleHybridSearch: () => set((s) => ({ useHybridSearch: !s.useHybridSearch })),
+                toggleDeepAgent: () => set((s) => ({ useDeepAgent: !s.useDeepAgent })),
             }),
             {
                 name: "voicezettel-settings",
@@ -179,8 +188,12 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                     lavMode: state.lavMode,
                     widgetEffects: state.widgetEffects,
                     prewarmTimeoutMinutes: state.prewarmTimeoutMinutes,
+                    useLiteLLM: state.useLiteLLM,
+                    litellmModel: state.litellmModel,
+                    useHybridSearch: state.useHybridSearch,
+                    useDeepAgent: state.useDeepAgent,
                 }),
-                version: 16,
+                version: 17,
                 migrate: (persisted, version) => {
                     const state = persisted as Record<string, unknown>;
                     if (version < 2) {
@@ -242,6 +255,12 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                     }
                     if (version < 16) {
                         state.prewarmTimeoutMinutes = state.prewarmTimeoutMinutes ?? 5;
+                    }
+                    if (version < 17) {
+                        state.useLiteLLM = state.useLiteLLM ?? false;
+                        state.litellmModel = state.litellmModel ?? "gpt-4o";
+                        state.useHybridSearch = state.useHybridSearch ?? false;
+                        state.useDeepAgent = state.useDeepAgent ?? false;
                     }
                     return state;
                 },

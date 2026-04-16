@@ -23,6 +23,7 @@ import { VoiceSection } from "./VoiceSection";
 import { AgentsSection } from "./AgentsSection";
 import { PromptsSection } from "./PromptsSection";
 import { ObsidianSection } from "./ObsidianSection";
+import { LiteLLMSection } from "./LiteLLMSection";
 import { LogsSection } from "./LogsSection";
 import { NotesSection } from "./NotesSection";
 import { useNotesStore } from "@/stores/notesStore";
@@ -90,6 +91,7 @@ function SectionContent({ id }: { id: SettingsSectionId }) {
                     <AiSection />
                     <VoiceSection />
                     <ObsidianSection />
+                    <LiteLLMSection />
                 </>
             );
         case "agents":

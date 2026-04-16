@@ -35,6 +35,8 @@ from pydantic import BaseModel
 from vault_scanner import VaultScanner
 from embedder import Embedder
 from watcher import VaultWatcher
+from bm25_index import BM25Index
+from hybrid_search import reciprocal_rank_fusion
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,6 +56,7 @@ PORT = int(os.environ.get("INDEXER_PORT", "8030"))
 scanner: Optional[VaultScanner] = None
 embedder: Optional[Embedder] = None
 watcher: Optional[VaultWatcher] = None
+bm25: Optional[BM25Index] = None
 collection = None
 index_state = {
     "running": False,
@@ -131,6 +134,14 @@ async def _index_documents(docs, source_label: str = ""):
 
     label = f" ({source_label})" if source_label else ""
     logger.info(f"Indexed {upserted} chunks{label}")
+
+    # Shadow Integration: sync to BM25 index (fire-and-forget)
+    try:
+        if bm25 is not None:
+            bm25.add_documents(ids, texts)
+    except Exception as e:
+        logger.warning(f"BM25 sync failed (non-critical): {e}")
+
     return upserted
 
 
@@ -161,13 +172,14 @@ def _on_file_change(event_type: str, file_path: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global scanner, embedder, watcher
+    global scanner, embedder, watcher, bm25
 
     if not VAULT_PATH:
         logger.error("VAULT_PATH not configured!")
     else:
         scanner = VaultScanner(VAULT_PATH)
         embedder = Embedder()
+        bm25 = BM25Index(persist_dir=os.path.join(os.path.dirname(__file__), "bm25_data"))
 
         # Init ChromaDB connection
         _get_chroma_collection()
@@ -176,7 +188,7 @@ async def lifespan(app: FastAPI):
         watcher = VaultWatcher(VAULT_PATH, _on_file_change)
         watcher.start()
 
-        logger.info(f"Indexer ready — vault: {VAULT_PATH}")
+        logger.info(f"Indexer ready — vault: {VAULT_PATH}, BM25: {bm25.count} docs")
 
     yield
 
@@ -376,6 +388,74 @@ async def health():
         "chroma_documents": col_count,
         "watcher_active": watcher.is_active if watcher else False,
         "embedder_enabled": embedder.is_enabled if embedder else False,
+    }
+
+
+# ── Phase 2: Hybrid Search (Shadow Integration) ───────────────
+
+@app.post("/search/hybrid")
+async def search_hybrid(req: SearchRequest):
+    """
+    Hybrid search: ChromaDB (vector) + BM25 (keyword) merged via RRF.
+    Returns the SAME JSON format as /search for UI compatibility.
+    Falls back to pure vector search if BM25 is unavailable.
+    """
+    if not embedder:
+        raise HTTPException(500, "Indexer not initialized")
+
+    col = _get_chroma_collection()
+    if col.count() == 0:
+        return []
+
+    # 1. ChromaDB vector search (existing logic, unchanged)
+    query_embedding = await embedder.embed_single(req.query)
+    where = {"source_type": req.source_type} if req.source_type else None
+    chroma_results = col.query(
+        query_embeddings=[query_embedding],
+        n_results=min(req.top_k * 2, 40),  # Fetch more for RRF
+        where=where,
+        include=["documents", "metadatas", "distances"],
+    )
+
+    vector_items = []
+    if chroma_results and chroma_results.get("ids") and chroma_results["ids"][0]:
+        for i, doc_id in enumerate(chroma_results["ids"][0]):
+            distance = chroma_results["distances"][0][i] if chroma_results.get("distances") else 0
+            relevance = max(0, round((1 - distance) * 100, 1))
+            vector_items.append({
+                "id": doc_id,
+                "text": chroma_results["documents"][0][i] if chroma_results.get("documents") else "",
+                "metadata": chroma_results["metadatas"][0][i] if chroma_results.get("metadatas") else {},
+                "distance": round(distance, 4),
+                "relevance_pct": relevance,
+            })
+
+    # 2. BM25 keyword search (new, shadow)
+    bm25_items = []
+    try:
+        if bm25 is not None:
+            bm25_items = bm25.search(req.query, top_k=req.top_k * 2)
+    except Exception as e:
+        logger.warning(f"BM25 search failed (falling back to pure vector): {e}")
+
+    # 3. Merge via RRF
+    if bm25_items:
+        merged = reciprocal_rank_fusion(vector_items, bm25_items, top_k=req.top_k)
+        return merged
+    else:
+        # Fallback: pure vector results
+        return vector_items[:req.top_k]
+
+
+@app.get("/bm25-stats")
+async def bm25_stats():
+    """BM25 index statistics for dashboard monitoring."""
+    if bm25 is None:
+        return {"available": False, "total_docs": 0, "status": "not_initialized"}
+    return {
+        "available": True,
+        "status": "ok",
+        **bm25.stats,
     }
 
 

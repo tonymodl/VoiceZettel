@@ -1,0 +1,16 @@
+{
+  "name": "voicezettel-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VoiceZettel Desktop — Tauri + Electron WebView shell for instant access",
+  "scripts": {
+    "tauri:dev": "cd src-tauri && cargo tauri dev",
+    "tauri:build": "cd src-tauri && cargo tauri build",
+    "electron:dev": "electron .",
+    "electron:build": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}

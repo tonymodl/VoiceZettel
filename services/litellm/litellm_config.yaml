@@ -1,0 +1,53 @@
+model_list:
+  # ── OpenAI ──
+  - model_name: "gpt-4o"
+    litellm_params:
+      model: "openai/gpt-4o"
+      api_key: "os.environ/OPENAI_API_KEY"
+  - model_name: "gpt-4o-mini"
+    litellm_params:
+      model: "openai/gpt-4o-mini"
+      api_key: "os.environ/OPENAI_API_KEY"
+
+  # ── Google Gemini ──
+  - model_name: "gemini-2.0-flash"
+    litellm_params:
+      model: "gemini/gemini-2.0-flash"
+      api_key: "os.environ/GOOGLE_GEMINI_API_KEY"
+  - model_name: "gemini-2.5-pro"
+    litellm_params:
+      model: "gemini/gemini-2.5-pro-preview-05-06"
+      api_key: "os.environ/GOOGLE_GEMINI_API_KEY"
+
+  # ── DeepSeek ──
+  - model_name: "deepseek-chat"
+    litellm_params:
+      model: "deepseek/deepseek-chat"
+      api_key: "os.environ/DEEPSEEK_API_KEY"
+  - model_name: "deepseek-reasoner"
+    litellm_params:
+      model: "deepseek/deepseek-reasoner"
+      api_key: "os.environ/DEEPSEEK_API_KEY"
+
+  # ── Anthropic (если добавят ключ) ──
+  - model_name: "claude-sonnet-4"
+    litellm_params:
+      model: "anthropic/claude-sonnet-4-20250514"
+      api_key: "os.environ/ANTHROPIC_API_KEY"
+
+  # ── Ollama (локальные модели) ──
+  - model_name: "ollama/llama3.1"
+    litellm_params:
+      model: "ollama/llama3.1"
+      api_base: "http://host.docker.internal:11434"
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  cache: true
+  cache_params:
+    type: "local"
+    ttl: 3600
+
+general_settings:
+  master_key: "sk-vz-litellm-local"

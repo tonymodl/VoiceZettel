@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+httpx
+python-dotenv
+pydantic
+# Phase 2: Shadow Integration
+docling[ocr]
+langchain>=0.3.0
+langchain-openai>=0.2.0

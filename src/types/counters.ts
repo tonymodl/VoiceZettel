@@ -83,6 +83,15 @@ export interface SettingsState {
     widgetEffects: WidgetEffectConfig[];
     /** Antigravity: время удержания фонового микрофона и кеша токенов (минуты) */
     prewarmTimeoutMinutes: number;
+    // ── Phase 2: Shadow Integration feature flags ────────────
+    /** LiteLLM: экспериментальный шлюз 100+ моделей */
+    useLiteLLM: boolean;
+    /** LiteLLM: выбранная модель */
+    litellmModel: string;
+    /** Гибридный поиск: BM25 + ChromaDB через RRF */
+    useHybridSearch: boolean;
+    /** Deep Agent: LangChain агент для обогащения заметок */
+    useDeepAgent: boolean;
 }
 
 export interface SettingsActions {
@@ -114,4 +123,9 @@ export interface SettingsActions {
     toggleLavMode: () => void;
     setWidgetEffect: (config: WidgetEffectConfig) => void;
     setPrewarmTimeoutMinutes: (minutes: number) => void;
+    // ── Phase 2: Shadow Integration actions ──────────────────
+    toggleUseLiteLLM: () => void;
+    setLitellmModel: (model: string) => void;
+    toggleHybridSearch: () => void;
+    toggleDeepAgent: () => void;
 }

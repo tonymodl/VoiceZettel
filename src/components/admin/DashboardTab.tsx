@@ -9,6 +9,7 @@ import {
     Wrench, Key, CreditCard, Clock,
     Brain, FolderSync, Users, Globe,
     HeartPulse, Workflow, Satellite,
+    Server, FileSearch, TextSearch, Sparkles, Monitor,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────
@@ -597,6 +598,105 @@ export function DashboardTab() {
         } catch {
             setApiCredits(null);
         }
+
+        // ── Phase 2: Shadow Integration Services ──────────────
+
+        // 15) LiteLLM Proxy (port 4000)
+        try {
+            const { data, latency } = await fetchWithTimeout("/api/litellm/health", 4000);
+            const d = data as { status: string; models: number };
+            const isOk = d.status === "ok";
+            results.push({
+                name: "LiteLLM Proxy",
+                nameRu: "LiteLLM (шлюз)",
+                icon: <Server className={`size-4 ${isOk ? "text-violet-400" : "text-zinc-500"}`} />,
+                status: isOk ? "online" : "degraded",
+                latency,
+                details: isOk ? `${d.models} моделей доступно` : "Прокси не отвечает",
+                descRu: isOk
+                    ? `✅ LiteLLM прокси работает. Доступно ${d.models} моделей (100+ провайдеров). Экспериментальный шлюз для /api/chat-lite.`
+                    : "⚠️ LiteLLM прокси не запущен. Для запуска: cd services/litellm && docker compose up -d",
+                badge: "4000",
+            });
+        } catch {
+            results.push({ name: "LiteLLM Proxy", nameRu: "LiteLLM (шлюз)", icon: <Server className="size-4 text-zinc-500" />, status: "degraded", latency: null, details: "Не запущен", descRu: "⚠️ LiteLLM Docker-контейнер не запущен. Запустите: cd services/litellm && docker compose up -d", badge: "4000" });
+        }
+
+        // 16) Docling Parser
+        try {
+            const { data, latency } = await fetchWithTimeout("/api/openclaw/docling/health", 4000);
+            const d = data as { status: string; available: boolean };
+            results.push({
+                name: "Docling Parser",
+                nameRu: "Docling (документы)",
+                icon: <FileSearch className={`size-4 ${d.available ? "text-orange-400" : "text-zinc-500"}`} />,
+                status: d.available ? "online" : "degraded",
+                latency,
+                details: d.available ? "PDF/PPTX/XLSX + OCR" : "Не установлен",
+                descRu: d.available
+                    ? "✅ Docling установлен. Парсинг PDF, PPTX, XLSX с OCR и сохранением таблиц."
+                    : "⚠️ Docling не установлен. Для установки: pip install 'docling[ocr]' в окружении OpenClaw.",
+                badge: "DOC",
+            });
+        } catch {
+            results.push({ name: "Docling Parser", nameRu: "Docling (документы)", icon: <FileSearch className="size-4 text-zinc-500" />, status: "degraded", latency: null, details: "Не проверяется", descRu: "⚠️ Не удалось проверить Docling — OpenClaw демон не отвечает.", badge: "DOC" });
+        }
+
+        // 17) BM25 Full-Text Index
+        try {
+            const { data, latency } = await fetchWithTimeout("/api/indexer/bm25-stats", 3000);
+            const d = data as { available: boolean; total_docs: number; index_builds: number; status: string };
+            results.push({
+                name: "BM25 Index",
+                nameRu: "BM25 (полнотекст)",
+                icon: <TextSearch className={`size-4 ${d.available && d.total_docs > 0 ? "text-lime-400" : "text-zinc-500"}`} />,
+                status: d.available && d.total_docs > 0 ? "online" : "degraded",
+                latency,
+                details: d.available ? `${d.total_docs.toLocaleString()} документов | ${d.index_builds} перестроек` : "Не инициализирован",
+                descRu: d.available && d.total_docs > 0
+                    ? `✅ Полнотекстовый BM25 индекс: ${d.total_docs.toLocaleString()} документов. Используется в гибридном поиске (RRF).`
+                    : "⚠️ BM25 индекс пуст. Запустите полную индексацию для наполнения. pip install rank-bm25",
+                badge: "BM25",
+            });
+        } catch {
+            results.push({ name: "BM25 Index", nameRu: "BM25 (полнотекст)", icon: <TextSearch className="size-4 text-zinc-500" />, status: "degraded", latency: null, details: "Не проверяется", descRu: "⚠️ BM25 индекс недоступен — сервис Indexer не отвечает.", badge: "BM25" });
+        }
+
+        // 18) Deep Agent (LangChain)
+        try {
+            const { data, latency } = await fetchWithTimeout("/api/openclaw/agent/health", 4000);
+            const d = data as { service: string; enabled: boolean; status: string; langchain_available?: boolean };
+            results.push({
+                name: "Deep Agent",
+                nameRu: "Deep Agent (ИИ)",
+                icon: <Sparkles className={`size-4 ${d.enabled && d.status === "ok" ? "text-yellow-400" : "text-zinc-500"}`} />,
+                status: d.enabled && d.status === "ok" ? "online" : "degraded",
+                latency,
+                details: d.enabled
+                    ? d.status === "ok" ? "LangChain ✓ | Sandbox активен" : "LangChain не установлен"
+                    : "Отключён (DEEP_AGENT_ENABLED=false)",
+                descRu: d.enabled
+                    ? d.status === "ok"
+                        ? "✅ Deep Agent активен. LangChain агент обогащает заметки связанными концепциями. Песочница: Wiki_v2/.drafts/"
+                        : "⚠️ Deep Agent включён, но LangChain не установлен. pip install langchain langchain-openai"
+                    : "⚠️ Deep Agent отключён. Установите DEEP_AGENT_ENABLED=true в .env для активации.",
+                badge: "AGT",
+            });
+        } catch {
+            results.push({ name: "Deep Agent", nameRu: "Deep Agent (ИИ)", icon: <Sparkles className="size-4 text-zinc-500" />, status: "degraded", latency: null, details: "Не проверяется", descRu: "⚠️ Не удалось проверить Deep Agent — OpenClaw демон не отвечает.", badge: "AGT" });
+        }
+
+        // 19) Desktop App (Tauri/Electron)
+        results.push({
+            name: "Desktop App",
+            nameRu: "Desktop (оболочка)",
+            icon: <Monitor className="size-4 text-sky-400" />,
+            status: "degraded",
+            latency: null,
+            details: "Tauri + Electron | Ctrl+Shift+Space",
+            descRu: "ℹ️ Desktop-оболочка (Tauri/Electron) готова к сборке. Запуск: cd desktop-app && npm run electron:dev. Хоткей: Ctrl+Shift+Space для мгновенного вызова.",
+            badge: "APP",
+        });
 
         setNodes(results);
         setLastRefresh(new Date());

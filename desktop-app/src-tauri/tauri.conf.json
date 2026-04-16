@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicedayfor/tauri/dev/core/tauri-config-schema/schema.json",
+  "productName": "VoiceZettel",
+  "version": "0.1.0",
+  "identifier": "com.voicezettel.desktop",
+  "build": {
+    "devUrl": "http://localhost:3000",
+    "frontendDist": "../src"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "VoiceZettel",
+        "width": 420,
+        "height": 780,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "transparent": true,
+        "resizable": true,
+        "url": "http://localhost:3000"
+      }
+    ],
+    "trayIcon": {
+      "tooltip": "VoiceZettel Desktop"
+    }
+  },
+  "plugins": {
+    "global-shortcut": {}
+  }
+}

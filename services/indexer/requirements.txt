@@ -6,3 +6,4 @@ watchdog
 python-dotenv
 pyyaml
 pydantic
+rank-bm25
