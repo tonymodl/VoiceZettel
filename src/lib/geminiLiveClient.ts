@@ -277,6 +277,52 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
             return;
         }
 
+        // ── Function Calling: toolCall from Gemini ──
+        // MUST be checked BEFORE serverContent — toolCall messages don't have serverContent!
+        const toolCall = data.toolCall as { functionCalls?: Array<{ name: string; id: string; args: Record<string, unknown> }> } | undefined;
+        if (toolCall?.functionCalls) {
+            opts.onOrbState("thinking");
+            opts.onLog("toolCall received", { calls: toolCall.functionCalls.map(c => c.name) });
+
+            const responses = await Promise.all(
+                toolCall.functionCalls.map(async (call) => {
+                    try {
+                        const res = await fetch("/api/gemini-tool-exec", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ tool: call.name, args: call.args }),
+                            signal: AbortSignal.timeout(5000), // 5s max — don't block Gemini
+                        });
+                        const json = await res.json() as { result: unknown };
+                        opts.onLog(`toolCall ${call.name} completed`, json.result);
+                        return {
+                            name: call.name,
+                            id: call.id,
+                            response: { result: json.result },
+                        };
+                    } catch (err) {
+                        opts.onLog(`toolCall ${call.name} failed`, err);
+                        return {
+                            name: call.name,
+                            id: call.id,
+                            response: { result: { error: "Сервис временно недоступен, попробуй позже" } },
+                        };
+                    }
+                })
+            );
+
+            // ALWAYS send toolResponse — Gemini hangs if it doesn't get one!
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    toolResponse: {
+                        functionResponses: responses,
+                    },
+                }));
+                opts.onLog("toolResponse sent", { count: responses.length });
+            }
+            return; // toolCall handled, don't process as serverContent
+        }
+
         const serverContent = data.serverContent as Record<string, unknown> | undefined;
         if (!serverContent) return;
 
@@ -341,49 +387,6 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
             }
             userTranscript = "";
             assistantTranscript = "";
-        }
-
-        // ── Function Calling: toolCall from Gemini ──
-        const toolCall = data.toolCall as { functionCalls?: Array<{ name: string; id: string; args: Record<string, unknown> }> } | undefined;
-        if (toolCall?.functionCalls) {
-            opts.onOrbState("thinking");
-            opts.onLog("toolCall received", { calls: toolCall.functionCalls.map(c => c.name) });
-
-            const responses = await Promise.all(
-                toolCall.functionCalls.map(async (call) => {
-                    try {
-                        const res = await fetch("/api/gemini-tool-exec", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ tool: call.name, args: call.args }),
-                        });
-                        const data = await res.json() as { result: unknown };
-                        opts.onLog(`toolCall ${call.name} completed`, data.result);
-                        return {
-                            name: call.name,
-                            id: call.id,
-                            response: { result: data.result },
-                        };
-                    } catch (err) {
-                        opts.onLog(`toolCall ${call.name} failed`, err);
-                        return {
-                            name: call.name,
-                            id: call.id,
-                            response: { error: `Tool execution failed: ${err instanceof Error ? err.message : String(err)}` },
-                        };
-                    }
-                })
-            );
-
-            // Send tool responses back to Gemini
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                    toolResponse: {
-                        functionResponses: responses,
-                    },
-                }));
-                opts.onLog("toolResponse sent", { count: responses.length });
-            }
         }
     };
 
