@@ -9,7 +9,8 @@ import { MeetingSummary } from "@/components/orb/MeetingSummary";
 import { useChatStore } from "@/stores/chatStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useVoiceSession } from "@/hooks/useVoiceSession";
-import { warmUpAudio } from "@/lib/sounds";
+import { usePrewarmer } from "@/hooks/usePrewarmer";
+import { warmUpAudio, playSound } from "@/lib/sounds";
 import type { OrbState } from "@/types/chat";
 
 const STATE_LABELS: Record<OrbState, string> = {
@@ -31,6 +32,9 @@ export function OrbArea() {
     const setOrbMode = useChatStore((s) => s.setOrbMode);
     const orbParticles = useSettingsStore((s) => s.orbParticles);
     const { isVoiceActive, startVoice, stopVoice, interruptSpeaking } = useVoiceSession();
+
+    // Antigravity Phase 2: Background pre-warming of mic, tokens, TTS servers
+    usePrewarmer();
 
     const [mode, setMode] = useState<OrbMode>("voice");
     const [showSummary, setShowSummary] = useState(false);
@@ -54,6 +58,11 @@ export function OrbArea() {
         if (isVoiceActive) {
             stopVoice();
         } else {
+            // Antigravity Phase 1: Optimistic UI — instant visual + audio feedback
+            // Orb turns cyan IMMEDIATELY, before any async network operations.
+            // If startVoice() fails, its catch block will reset to 'idle'.
+            useChatStore.getState().setOrbState("listening");
+            try { playSound("crystal_chime"); } catch { /* non-critical */ }
             startVoice();
         }
     }, [isVoiceActive, startVoice, stopVoice, interruptSpeaking, orbState]);

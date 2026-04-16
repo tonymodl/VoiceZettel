@@ -142,17 +142,21 @@ export async function handleToolCalls(
             if (tc.function.name === "save_memory") {
                 const text = args.text as string;
                 const tags = (args.tags as string[]) ?? [];
-                const memory = await saveMemory(userId, text, tags);
+                // Antigravity Phase 4: fire-and-forget — LLM responds instantly
+                const memoryId = crypto.randomUUID();
+                void saveMemory(userId, text, tags).catch(err =>
+                    logger.error(`[Antigravity] Background saveMemory failed: ${err instanceof Error ? err.message : String(err)}`)
+                );
                 results.push({
                     role: "tool",
                     tool_call_id: tc.id,
                     content: JSON.stringify({
                         success: true,
-                        id: memory.id,
-                        text: memory.text,
+                        id: memoryId,
+                        text,
                     }),
                 });
-                logger.debug(`Memory saved via function call: "${text.slice(0, 50)}"`);
+                logger.debug(`Memory queued via function call: "${text.slice(0, 50)}"`);
             } else if (tc.function.name === "search_memory") {
                 const query = args.query as string;
                 const found = await searchMemories(userId, query);
@@ -208,20 +212,26 @@ ${action}
 `;
 
                 const safeTitle = title.replace(/[\\/:*?"<>|]/g, "").trim().slice(0, 100);
-                const writeResult = await writeNoteToVault(userId, safeTitle, markdown);
-                await saveMemory(userId, `Zettel: ${title} — ${essence.slice(0, 100)}`, ["zettel", noteType, ...tags.map((t) => t.replace("#", ""))]);
+                // Antigravity Phase 4: fire-and-forget — vault write in background
+                void (async () => {
+                    try {
+                        await writeNoteToVault(userId, safeTitle, markdown);
+                        await saveMemory(userId, `Zettel: ${title} — ${essence.slice(0, 100)}`, ["zettel", noteType, ...tags.map((t) => t.replace("#", ""))]);
+                    } catch (err) {
+                        logger.error(`[Antigravity] Background create_zettel failed: ${err instanceof Error ? err.message : String(err)}`);
+                    }
+                })();
 
                 results.push({
                     role: "tool",
                     tool_call_id: tc.id,
                     content: JSON.stringify({
-                        success: writeResult.success,
+                        success: true,
                         title: safeTitle,
-                        method: writeResult.method,
-                        error: writeResult.error,
+                        method: "background",
                     }),
                 });
-                logger.debug(`Zettel created: "${safeTitle}" [${noteType}] via ${writeResult.method}`);
+                logger.debug(`Zettel queued: "${safeTitle}" [${noteType}]`);
             }
         } catch (err) {
             results.push({

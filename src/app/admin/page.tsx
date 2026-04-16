@@ -1,16 +1,37 @@
 "use client";
 
+import { lazy, Suspense } from "react";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
-import { DashboardTab } from "@/components/admin/DashboardTab";
 import { LogsTab } from "@/components/admin/LogsTab";
 import { PromptsTab } from "@/components/admin/PromptsTab";
-import { TelegramTab } from "@/components/admin/TelegramTab";
 import { UsersTab } from "@/components/admin/UsersTab";
 import MissionControlTab from "@/components/admin/MissionControlTab";
 import WorkspaceTab from "@/components/admin/WorkspaceTab";
 import { useAdminStore } from "@/stores/adminStore";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
+
+// Antigravity Phase 4: Lazy load heavy admin tabs (84KB + 78KB = 162KB)
+// These are loaded only when user switches to the corresponding tab.
+const DashboardTab = lazy(() =>
+    import("@/components/admin/DashboardTab").then((m) => ({ default: m.DashboardTab }))
+);
+const TelegramTab = lazy(() =>
+    import("@/components/admin/TelegramTab").then((m) => ({ default: m.TelegramTab }))
+);
+
+function LoadingSkeleton() {
+    return (
+        <div className="space-y-4 animate-pulse">
+            <div className="h-6 w-48 rounded-lg bg-zinc-800" />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="h-32 rounded-xl bg-zinc-800/50" />
+                ))}
+            </div>
+        </div>
+    );
+}
 
 const TAB_TITLES: Record<string, string> = {
     dashboard: "📊 Дашборд",
@@ -66,10 +87,18 @@ export default function AdminPage() {
 
                 {/* Tab content */}
                 <main className="flex-1 overflow-y-auto p-3 sm:p-4">
-                    {activeTab === "dashboard" && <DashboardTab />}
+                    {activeTab === "dashboard" && (
+                        <Suspense fallback={<LoadingSkeleton />}>
+                            <DashboardTab />
+                        </Suspense>
+                    )}
                     {activeTab === "logs" && <LogsTab />}
                     {activeTab === "prompts" && <PromptsTab />}
-                    {activeTab === "telegram" && <TelegramTab />}
+                    {activeTab === "telegram" && (
+                        <Suspense fallback={<LoadingSkeleton />}>
+                            <TelegramTab />
+                        </Suspense>
+                    )}
                     {activeTab === "users" && <UsersTab />}
                     {activeTab === "mission-control" && <MissionControlTab />}
                     {activeTab === "workspace" && <WorkspaceTab />}

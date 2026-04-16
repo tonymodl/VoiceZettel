@@ -82,6 +82,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                 voiceMode: "gemini-live",
                 lavMode: false,
                 widgetEffects: [],
+                prewarmTimeoutMinutes: 5,
 
                 toggleShowUsdTokens: () =>
                     set((s) => ({ showUsdTokens: !s.showUsdTokens })),
@@ -148,6 +149,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                         const existing = s.widgetEffects.filter((e: WidgetEffectConfig) => e.widgetId !== config.widgetId);
                         return { widgetEffects: [...existing, config] };
                     }),
+                setPrewarmTimeoutMinutes: (minutes) => set({ prewarmTimeoutMinutes: minutes }),
             }),
             {
                 name: "voicezettel-settings",
@@ -176,8 +178,9 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                     voiceMode: state.voiceMode,
                     lavMode: state.lavMode,
                     widgetEffects: state.widgetEffects,
+                    prewarmTimeoutMinutes: state.prewarmTimeoutMinutes,
                 }),
-                version: 15,
+                version: 16,
                 migrate: (persisted, version) => {
                     const state = persisted as Record<string, unknown>;
                     if (version < 2) {
@@ -236,6 +239,9 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                     }
                     if (version < 15) {
                         state.widgetEffects = state.widgetEffects ?? [];
+                    }
+                    if (version < 16) {
+                        state.prewarmTimeoutMinutes = state.prewarmTimeoutMinutes ?? 5;
                     }
                     return state;
                 },

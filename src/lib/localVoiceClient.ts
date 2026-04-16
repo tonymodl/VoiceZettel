@@ -5,6 +5,7 @@
  */
 
 import { logger } from "@/lib/logger";
+import { EarlyAudioBuffer } from "@/lib/earlyAudioBuffer";
 
 export interface LocalVoiceCallbacks {
     onTranscriptUser: (text: string, isFinal: boolean) => void;
@@ -37,6 +38,8 @@ export class LocalVoiceClient {
     private localStream: MediaStream | null = null;
     private callbacks: LocalVoiceCallbacks;
     private _isMuted = false;
+    // Antigravity Phase 3: buffer audio while WS is connecting
+    private earlyBuffer = new EarlyAudioBuffer();
 
     constructor(callbacks: LocalVoiceCallbacks) {
         this.callbacks = callbacks;
@@ -89,6 +92,12 @@ export class LocalVoiceClient {
 
             this.ws.onopen = () => {
                 logger.info("[LocalVoice] WebSocket connected");
+                // Antigravity Phase 3: flush any audio buffered during connect
+                this.earlyBuffer.flush(chunk => {
+                    if (this.ws?.readyState === WebSocket.OPEN) {
+                        this.ws.send(chunk);
+                    }
+                });
             };
 
             this.ws.onmessage = (event: MessageEvent) => {
@@ -106,15 +115,18 @@ export class LocalVoiceClient {
                 this.callbacks.onStatusChange("closed");
             };
 
-            // 4. Route audio worklet output to WebSocket
             this.workletNode.port.onmessage = (
                 event: MessageEvent<ArrayBuffer>,
             ) => {
+                if (this._isMuted) {
+                    return;
+                }
+                // Antigravity Phase 3: buffer audio if WS not yet open
                 if (
-                    this._isMuted ||
                     !this.ws ||
                     this.ws.readyState !== WebSocket.OPEN
                 ) {
+                    this.earlyBuffer.push(event.data);
                     return;
                 }
                 // Send raw PCM16 bytes
@@ -243,6 +255,9 @@ export class LocalVoiceClient {
         }
 
         this._isMuted = false;
+        // Antigravity Phase 3: discard any remaining buffered audio
+        this.earlyBuffer.discard();
+        this.earlyBuffer = new EarlyAudioBuffer();
         logger.info("[LocalVoice] Stopped");
     }
 

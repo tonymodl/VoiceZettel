@@ -81,6 +81,8 @@ export interface SettingsState {
     voiceMode: VoiceMode;
     lavMode: boolean;
     widgetEffects: WidgetEffectConfig[];
+    /** Antigravity: время удержания фонового микрофона и кеша токенов (минуты) */
+    prewarmTimeoutMinutes: number;
 }
 
 export interface SettingsActions {
@@ -111,4 +113,5 @@ export interface SettingsActions {
     setVoiceMode: (mode: VoiceMode) => void;
     toggleLavMode: () => void;
     setWidgetEffect: (config: WidgetEffectConfig) => void;
+    setPrewarmTimeoutMinutes: (minutes: number) => void;
 }
