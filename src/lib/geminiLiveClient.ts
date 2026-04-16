@@ -280,12 +280,14 @@ function buildTools(caps?: GeminiLiveOptions["capabilities"]) {
         });
         declarations.push({
             name: "create_task",
-            description: "Создать задачу/заметку в Obsidian. Используй когда пользователь просит создать задачу или запись.",
+            description: "Создать задачу для Антигравити или для себя. Используй когда пользователь просит создать задачу, запись или TODO.",
             parameters: {
                 type: "OBJECT",
                 properties: {
                     title: { type: "STRING", description: "Название задачи" },
-                    description: { type: "STRING", description: "Описание задачи" },
+                    description: { type: "STRING", description: "Подробное описание задачи с контекстом и требованиями" },
+                    priority: { type: "STRING", description: "Приоритет: low, medium, high, critical" },
+                    assignee: { type: "STRING", description: "Кому назначена: antigravity (по умолчанию) или anton" },
                 },
                 required: ["title"],
             },

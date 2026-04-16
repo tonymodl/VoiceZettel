@@ -183,14 +183,18 @@ export async function POST(req: NextRequest) {
             case "create_task": {
                 const title = String(args.title ?? "");
                 const description = String(args.description ?? "");
+                const priority = String(args.priority ?? "medium");
+                const assignee = String(args.assignee ?? "antigravity");
+
                 if (!title) {
                     result = { error: "Title is required" };
                     break;
                 }
 
-                // Save as Obsidian note
+                // 1. Save as Obsidian note
+                let obsidianSaved = false;
                 try {
-                    const content = `# ${title}\n\n${description}\n\n---\n*Создано голосом через VoiceZettel*`;
+                    const content = `# ${title}\n\n${description}\n\n**Приоритет:** ${priority}\n**Назначено:** ${assignee}\n\n---\n*Создано голосом через VoiceZettel*`;
                     const notePath = `Tasks/${title.replace(/[/\\:*?"<>|]/g, "_")}.md`;
                     const res = await fetch(`${OBSIDIAN_URL}/vault/${notePath}`, {
                         method: "PUT",
@@ -201,10 +205,31 @@ export async function POST(req: NextRequest) {
                         body: content,
                         signal: AbortSignal.timeout(3000),
                     });
-                    result = { created: res.ok, path: notePath };
-                } catch {
-                    result = { error: "Obsidian not available" };
-                }
+                    obsidianSaved = res.ok;
+                } catch { /* Obsidian may be offline */ }
+
+                // 2. Save to ChromaDB via Tasks API
+                let chromaSaved = false;
+                try {
+                    const baseUrl = req.nextUrl.origin;
+                    const res = await fetch(`${baseUrl}/api/tasks`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ title, description, priority, assignee, userId }),
+                        signal: AbortSignal.timeout(5000),
+                    });
+                    chromaSaved = res.ok;
+                } catch { /* ChromaDB may be offline */ }
+
+                result = {
+                    created: obsidianSaved || chromaSaved,
+                    obsidian: obsidianSaved,
+                    chromadb: chromaSaved,
+                    title,
+                    priority,
+                    assignee,
+                    message: `Задача "${title}" создана (Obsidian: ${obsidianSaved ? "✓" : "✗"}, ChromaDB: ${chromaSaved ? "✓" : "✗"}).`,
+                };
                 break;
             }
 
@@ -246,45 +271,6 @@ export async function POST(req: NextRequest) {
                     }
                 } catch (err) {
                     result = { error: `Telegram сервис недоступен: ${err instanceof Error ? err.message : String(err)}` };
-                }
-                break;
-            }
-            case "create_task": {
-                const title = String(args.title ?? "");
-                const description = String(args.description ?? "");
-                const priority = String(args.priority ?? "medium");
-                const assignee = String(args.assignee ?? "antigravity");
-
-                if (!title) {
-                    result = { error: "Title is required" };
-                    break;
-                }
-
-                try {
-                    // Create task via Tasks API
-                    const baseUrl = req.nextUrl.origin;
-                    const res = await fetch(`${baseUrl}/api/tasks`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ title, description, priority, assignee, userId }),
-                        signal: AbortSignal.timeout(5000),
-                    });
-
-                    if (res.ok) {
-                        const data = await res.json() as { task: { id: string; title: string; priority: string } };
-                        result = {
-                            created: true,
-                            task_id: data.task.id,
-                            title: data.task.title,
-                            priority: data.task.priority,
-                            message: `Задача "${title}" создана для ${assignee}.`,
-                        };
-                    } else {
-                        const errData = await res.json().catch(() => ({ error: "Unknown" })) as { error?: string };
-                        result = { error: errData.error ?? "Failed to create task" };
-                    }
-                } catch (err) {
-                    result = { error: `Task creation failed: ${err instanceof Error ? err.message : String(err)}` };
                 }
                 break;
             }
