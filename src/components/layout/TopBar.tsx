@@ -107,6 +107,14 @@ export function TopBar({ user }: { user?: UserInfo | null }) {
     setInitialSection(null);
   };
 
+  // Listen for counter badge clicks to open notes with filter
+  useEffect(() => {
+    const handler = () => openSettings("notes");
+    window.addEventListener("open-notes-filter", handler);
+    return () => window.removeEventListener("open-notes-filter", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <>
       <header className="flex h-14 shrink-0 items-center justify-between">

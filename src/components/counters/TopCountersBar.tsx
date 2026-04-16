@@ -1,11 +1,21 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import { Lightbulb, Heart, Users, ListChecks, Tag, Wallet } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useCountersStore } from "@/stores/countersStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useAnimationStore } from "@/stores/animationStore";
+import { useNotesStore } from "@/stores/notesStore";
+import type { NoteCategory } from "@/types/notes";
+
+/** Map badge keys to NoteCategory for filtering */
+const BADGE_TO_CATEGORY: Record<string, NoteCategory> = {
+    ideas: "idea",
+    facts: "fact",
+    persons: "persona",
+    tasks: "task",
+};
 
 interface BadgeConfig {
     key: string;
@@ -13,6 +23,7 @@ interface BadgeConfig {
     icon: React.ElementType;
     getValue: () => number;
     showFlag: boolean;
+    filterCategory?: NoteCategory;
 }
 
 function CounterBadge({
@@ -20,11 +31,13 @@ function CounterBadge({
     value,
     label,
     badgeKey,
+    onClick,
 }: {
     icon: React.ElementType;
     value: number;
     label: string;
     badgeKey: string;
+    onClick?: () => void;
 }) {
     const isGlowing = useAnimationStore((s) => s.glowingWidgets.has(badgeKey));
 
@@ -42,7 +55,10 @@ function CounterBadge({
                 duration: isGlowing ? 0.4 : 0.2,
                 ...(isGlowing ? { times: [0, 0.3, 1] } : {}),
             }}
-            className="flex flex-col items-center gap-0.5"
+            className="flex cursor-pointer flex-col items-center gap-0.5"
+            onClick={onClick}
+            role="button"
+            tabIndex={0}
         >
             {/* Pill: icon + number */}
             <div
@@ -201,6 +217,18 @@ export function TopCountersBar() {
         return () => clearInterval(interval);
     }, [showOpenAIBalance, loadOpenAIBalance]);
 
+    const setFilter = useNotesStore((s) => s.setFilter);
+
+    const handleBadgeClick = useCallback((badgeKey: string) => {
+        // Set the filter in notes store
+        const category = BADGE_TO_CATEGORY[badgeKey] ?? badgeKey;
+        setFilter(category as NoteCategory);
+        // Dispatch event for TopBar to open SettingsPanel at "notes"
+        window.dispatchEvent(
+            new CustomEvent("open-notes-filter", { detail: { filter: category } })
+        );
+    }, [setFilter]);
+
     const badges: BadgeConfig[] = [
         {
             key: "ideas",
@@ -257,6 +285,7 @@ export function TopCountersBar() {
                             icon={badge.icon}
                             value={badge.getValue()}
                             label={badge.label}
+                            onClick={() => handleBadgeClick(badge.key)}
                         />
                     ))}
                 </AnimatePresence>
