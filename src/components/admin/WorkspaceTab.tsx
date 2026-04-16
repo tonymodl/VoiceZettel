@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   FileText, Table2, Upload, Link2, RefreshCw,
-  ExternalLink, Settings, Plus, Trash2, CheckCircle2,
-  Loader2, AlertTriangle, FileSearch
+  ExternalLink, Plus, Trash2, CheckCircle2,
+  Loader2, AlertTriangle, FileSearch, Presentation,
+  LogIn, LogOut, ShieldCheck, Globe
 } from "lucide-react";
 
 /**
  * WorkspaceTab — Google Workspace integration panel.
- * Phase 5: Manages linked Google Docs/Sheets, system prompts,
- * and ChromaDB synchronization for document-aware AI conversations.
+ * Full integration: Docs + Sheets + Slides via OAuth.
+ * Falls back to public export for unauthenticated users.
  */
 
 interface LinkedDocument {
@@ -22,11 +23,18 @@ interface LinkedDocument {
   lastSync: string | null;
   chunkCount: number;
   indexedCount: number;
+  fetchMethod: "oauth" | "public" | null;
   status: "synced" | "pending" | "syncing" | "error";
   errorMessage?: string;
 }
 
-// Will load from localStorage
+interface GoogleStatus {
+  connected: boolean;
+  email: string | null;
+  clientConfigured: boolean;
+}
+
+// localStorage persistence
 function loadDocuments(): LinkedDocument[] {
   if (typeof window === "undefined") return [];
   try {
@@ -42,12 +50,34 @@ function saveDocuments(docs: LinkedDocument[]) {
   localStorage.setItem("voicezettel_workspace_docs", JSON.stringify(docs));
 }
 
+function detectDocType(url: string): "doc" | "sheet" | "slides" {
+  if (url.includes("spreadsheets")) return "sheet";
+  if (url.includes("presentation")) return "slides";
+  return "doc";
+}
+
+const DOC_TYPE_LABELS = {
+  doc: "Документ",
+  sheet: "Таблица",
+  slides: "Презентация",
+};
+
 export default function WorkspaceTab() {
   const [documents, setDocuments] = useState<LinkedDocument[]>(loadDocuments);
   const [addingNew, setAddingNew] = useState(false);
   const [newUrl, setNewUrl] = useState("");
   const [newPrompt, setNewPrompt] = useState("");
   const [syncing, setSyncing] = useState<string | null>(null);
+  const [googleStatus, setGoogleStatus] = useState<GoogleStatus | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  // Check Google connection status
+  useEffect(() => {
+    fetch("/api/auth/google/status")
+      .then((r) => r.json())
+      .then((d) => setGoogleStatus(d as GoogleStatus))
+      .catch(() => setGoogleStatus({ connected: false, email: null, clientConfigured: false }));
+  }, []);
 
   const updateAndSave = useCallback((updater: (prev: LinkedDocument[]) => LinkedDocument[]) => {
     setDocuments((prev) => {
@@ -62,17 +92,18 @@ export default function WorkspaceTab() {
 
     const urlMatch = newUrl.match(/\/d\/([\w-]+)/);
     const docId = urlMatch ? urlMatch[1] : crypto.randomUUID().slice(0, 12);
-    const isSheet = newUrl.includes("spreadsheets");
+    const docType = detectDocType(newUrl);
 
     const doc: LinkedDocument = {
       id: docId,
-      title: `Document ${docId.slice(0, 8)}...`,
-      type: isSheet ? "sheet" : "doc",
+      title: `${DOC_TYPE_LABELS[docType]} ${docId.slice(0, 8)}...`,
+      type: docType,
       url: newUrl,
       systemPrompt: newPrompt || "Используй содержимое этого документа как контекст для ответов.",
       lastSync: null,
       chunkCount: 0,
       indexedCount: 0,
+      fetchMethod: null,
       status: "pending",
     };
 
@@ -84,7 +115,6 @@ export default function WorkspaceTab() {
 
   const handleSync = useCallback(async (docId: string) => {
     setSyncing(docId);
-    // Mark as syncing
     updateAndSave((prev) =>
       prev.map((d) => d.id === docId ? { ...d, status: "syncing" as const, errorMessage: undefined } : d)
     );
@@ -113,6 +143,8 @@ export default function WorkspaceTab() {
                   chunkCount: data.chunkCount || 0,
                   indexedCount: data.indexedCount || 0,
                   title: data.documentTitle || d.title,
+                  type: data.documentType || d.type,
+                  fetchMethod: data.fetchMethod || null,
                   errorMessage: undefined,
                 }
               : d
@@ -140,9 +172,24 @@ export default function WorkspaceTab() {
     }
   }, [documents, updateAndSave]);
 
+  const handleSyncAll = useCallback(async () => {
+    for (const doc of documents) {
+      await handleSync(doc.id);
+    }
+  }, [documents, handleSync]);
+
   const handleRemove = useCallback((docId: string) => {
     updateAndSave((prev) => prev.filter((d) => d.id !== docId));
   }, [updateAndSave]);
+
+  const handleDisconnect = useCallback(async () => {
+    setDisconnecting(true);
+    try {
+      await fetch("/api/auth/google/status", { method: "DELETE" });
+      setGoogleStatus({ connected: false, email: null, clientConfigured: googleStatus?.clientConfigured || false });
+    } catch { /* ignore */ }
+    setDisconnecting(false);
+  }, [googleStatus]);
 
   const syncedCount = documents.filter((d) => d.status === "synced").length;
   const totalChunks = documents.reduce((acc, d) => acc + d.chunkCount, 0);
@@ -157,7 +204,7 @@ export default function WorkspaceTab() {
           </div>
           <div>
             <h2 className="text-lg font-semibold text-zinc-100">Google Workspace</h2>
-            <p className="text-xs text-zinc-500">Привязка документов для контекстного AI</p>
+            <p className="text-xs text-zinc-500">Документы • Таблицы • Презентации → ChromaDB</p>
           </div>
         </div>
 
@@ -169,32 +216,88 @@ export default function WorkspaceTab() {
               <span>{totalChunks} чанков</span>
             </div>
           )}
+          {documents.length > 1 && (
+            <button
+              onClick={handleSyncAll}
+              disabled={!!syncing}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-400 text-xs font-medium transition-all hover:bg-violet-500/20 disabled:opacity-50"
+            >
+              <RefreshCw className="size-3.5" />
+              Синхронизировать все
+            </button>
+          )}
           <button
             onClick={() => setAddingNew(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium transition-all hover:bg-blue-500/20"
           >
             <Plus className="size-3.5" />
-            Добавить документ
+            Добавить
           </button>
         </div>
       </div>
 
-      {/* OAuth Status */}
+      {/* Google OAuth Status */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Settings className="size-4 text-zinc-500" />
-            <span className="text-sm text-zinc-300">Google Docs Sync</span>
+          <div className="flex items-center gap-3">
+            {googleStatus?.connected ? (
+              <>
+                <div className="p-2 rounded-lg bg-emerald-500/10">
+                  <ShieldCheck className="size-4 text-emerald-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-zinc-200">Google подключён</span>
+                    <span className="text-xs text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                      Полный доступ ✓
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    {googleStatus.email} • Docs + Sheets + Slides + Drive
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="p-2 rounded-lg bg-zinc-800">
+                  <Globe className="size-4 text-zinc-500" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-zinc-300">Google не подключён</span>
+                    <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded-full">
+                      Только публичные ✓
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-600 mt-0.5">
+                    Подключите Google для доступа к приватным документам, таблицам и презентациям
+                  </p>
+                </div>
+              </>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-              Публичные документы ✓
-            </span>
+
+          <div>
+            {googleStatus?.connected ? (
+              <button
+                onClick={handleDisconnect}
+                disabled={disconnecting}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-zinc-500 text-xs transition-all hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50"
+              >
+                <LogOut className="size-3.5" />
+                Отключить
+              </button>
+            ) : (
+              <a
+                href="/api/auth/google"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-medium transition-all hover:bg-blue-500 shadow-lg shadow-blue-500/20"
+              >
+                <LogIn className="size-3.5" />
+                Подключить Google
+              </a>
+            )}
           </div>
         </div>
-        <p className="mt-2 text-xs text-zinc-600">
-          Публичные Google Docs синхронизируются автоматически. Для приватных документов настройте Google OAuth credentials в .env.
-        </p>
       </div>
 
       {/* Add new document form */}
@@ -210,10 +313,17 @@ export default function WorkspaceTab() {
                 type="url"
                 value={newUrl}
                 onChange={(e) => setNewUrl(e.target.value)}
-                placeholder="https://docs.google.com/document/d/..."
+                placeholder="https://docs.google.com/document/d/... или /spreadsheets/d/... или /presentation/d/..."
                 className="flex-1 bg-zinc-800/50 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20"
               />
             </div>
+            {newUrl && (
+              <div className="mt-1 flex items-center gap-1.5 text-[10px] text-zinc-500">
+                {detectDocType(newUrl) === "doc" && <><FileText className="size-3 text-blue-400" /> Документ</>}
+                {detectDocType(newUrl) === "sheet" && <><Table2 className="size-3 text-emerald-400" /> Таблица {!googleStatus?.connected && <span className="text-amber-400">(нужна авторизация Google)</span>}</>}
+                {detectDocType(newUrl) === "slides" && <><Presentation className="size-3 text-orange-400" /> Презентация {!googleStatus?.connected && <span className="text-amber-400">(нужна авторизация Google)</span>}</>}
+              </div>
+            )}
           </div>
 
           <div>
@@ -257,25 +367,39 @@ export default function WorkspaceTab() {
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-start gap-3 min-w-0">
                   <div className={`p-2 rounded-lg shrink-0 ${
-                    doc.type === "sheet" ? "bg-emerald-500/10" : "bg-blue-500/10"
+                    doc.type === "sheet" ? "bg-emerald-500/10" : 
+                    doc.type === "slides" ? "bg-orange-500/10" : "bg-blue-500/10"
                   }`}>
                     {doc.type === "sheet" ? (
                       <Table2 className="size-4 text-emerald-400" />
+                    ) : doc.type === "slides" ? (
+                      <Presentation className="size-4 text-orange-400" />
                     ) : (
                       <FileText className="size-4 text-blue-400" />
                     )}
                   </div>
                   <div className="min-w-0">
                     <h4 className="text-sm font-medium text-zinc-200 truncate">{doc.title}</h4>
-                    <a
-                      href={doc.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[10px] text-zinc-600 hover:text-blue-400 flex items-center gap-1 mt-0.5"
-                    >
-                      <ExternalLink className="size-2.5" />
-                      Открыть в Google
-                    </a>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <a
+                        href={doc.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-zinc-600 hover:text-blue-400 flex items-center gap-1"
+                      >
+                        <ExternalLink className="size-2.5" />
+                        Открыть в Google
+                      </a>
+                      {doc.fetchMethod && (
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
+                          doc.fetchMethod === "oauth" 
+                            ? "bg-emerald-500/10 text-emerald-400"
+                            : "bg-zinc-700 text-zinc-400"
+                        }`}>
+                          {doc.fetchMethod === "oauth" ? "Google API" : "Публичный"}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -362,7 +486,7 @@ export default function WorkspaceTab() {
             </div>
             <p className="text-sm text-zinc-400">Нет привязанных документов</p>
             <p className="text-xs text-zinc-600 mt-1">
-              Добавьте Google Docs/Sheets для контекстного общения с AI
+              Добавьте Google Docs, Sheets или Slides для контекстного общения с AI
             </p>
           </div>
         )}
@@ -374,11 +498,13 @@ export default function WorkspaceTab() {
         <ul className="space-y-1.5 text-xs text-zinc-600">
           <li className="flex items-start gap-2">
             <span className="text-blue-400 mt-0.5">1.</span>
-            Привяжите Google Doc или Sheet по URL
+            {googleStatus?.connected 
+              ? "Google подключён — доступны приватные документы, таблицы и презентации"
+              : "Подключите Google для полного доступа (или добавляйте публичные документы без авторизации)"}
           </li>
           <li className="flex items-start gap-2">
             <span className="text-blue-400 mt-0.5">2.</span>
-            Задайте системный промпт — он определит контекст использования
+            Привяжите документ по URL и задайте системный промпт — он определит контекст использования
           </li>
           <li className="flex items-start gap-2">
             <span className="text-blue-400 mt-0.5">3.</span>

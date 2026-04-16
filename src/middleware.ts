@@ -9,6 +9,6 @@ export const config = {
          * - favicon.ico, sitemap.xml, robots.txt
          * - public assets
          */
-        "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|api/health|api/health-openai|api/voice-health|api/auto-heal|api/api-credits|api/indexer|api/telegram|api/obsidian|.*\\.png$|.*\\.jpg$|.*\\.svg$|.*\\.ico$).*)",
+        "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|api/health|api/health-openai|api/voice-health|api/auto-heal|api/api-credits|api/indexer|api/telegram|api/obsidian|api/auth|api/workspace|.*\\.png$|.*\\.jpg$|.*\\.svg$|.*\\.ico$).*)",
     ],
 };

@@ -90,3 +90,6 @@ data/allowed_users.json
 
 # Export tracker (regeneratable)
 services/telegram/export_progress.json
+
+# Google OAuth tokens (contains auth secrets — NEVER commit)
+.google/

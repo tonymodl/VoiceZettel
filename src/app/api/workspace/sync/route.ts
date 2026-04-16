@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
+import { getValidAccessToken } from "@/lib/googleTokens";
 
 /**
  * POST /api/workspace/sync — Sync a Google document to ChromaDB.
  * 
- * Phase 5: Fetches document content via public export URL,
- * chunks the text, and indexes it into ChromaDB for context-aware AI.
- * 
  * Supports two modes:
  * 1. Public Google Docs — fetched via export?format=txt (no OAuth needed)
- * 2. Private Google Docs — requires Google OAuth (TODO)
+ * 2. Private Google Docs — fetched via Google Docs/Sheets API with OAuth tokens
+ * 
+ * Also supports Google Sheets via Sheets API (export as CSV).
  */
 
 const INDEXER_URL = process.env.INDEXER_SERVICE_URL || "http://127.0.0.1:8030";
@@ -44,6 +44,162 @@ function extractGoogleDocId(urlOrId: string): string | null {
     return null;
 }
 
+function detectDocType(url: string): "doc" | "sheet" | "slides" {
+    if (url.includes("spreadsheets")) return "sheet";
+    if (url.includes("presentation")) return "slides";
+    return "doc";
+}
+
+/**
+ * Fetch document content using Google Docs API (OAuth required).
+ */
+async function fetchViaDocsAPI(docId: string, accessToken: string): Promise<{ text: string; title: string }> {
+    const res = await fetch(`https://docs.googleapis.com/v1/documents/${docId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new Error(`Docs API: ${res.status}`);
+    const doc = await res.json();
+
+    // Extract text content from the document body
+    let text = "";
+    const title = doc.title || `Document ${docId.slice(0, 8)}...`;
+
+    if (doc.body?.content) {
+        for (const element of doc.body.content) {
+            if (element.paragraph?.elements) {
+                for (const el of element.paragraph.elements) {
+                    if (el.textRun?.content) {
+                        text += el.textRun.content;
+                    }
+                }
+            }
+            if (element.table) {
+                // Extract table cells
+                for (const row of element.table.tableRows || []) {
+                    for (const cell of row.tableCells || []) {
+                        for (const cellContent of cell.content || []) {
+                            if (cellContent.paragraph?.elements) {
+                                for (const el of cellContent.paragraph.elements) {
+                                    if (el.textRun?.content) {
+                                        text += el.textRun.content + " | ";
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    text += "\n";
+                }
+            }
+        }
+    }
+
+    return { text, title };
+}
+
+/**
+ * Fetch spreadsheet content using Google Sheets API (OAuth required).
+ */
+async function fetchViaSheets(docId: string, accessToken: string): Promise<{ text: string; title: string }> {
+    // Get spreadsheet metadata
+    const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${docId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(15000),
+    });
+    if (!metaRes.ok) throw new Error(`Sheets API: ${metaRes.status}`);
+    const meta = await metaRes.json();
+    const title = meta.properties?.title || `Sheet ${docId.slice(0, 8)}...`;
+
+    // Get all sheet data
+    let text = `# ${title}\n\n`;
+    for (const sheet of meta.sheets || []) {
+        const sheetTitle = sheet.properties?.title;
+        if (!sheetTitle) continue;
+
+        const dataRes = await fetch(
+            `https://sheets.googleapis.com/v4/spreadsheets/${docId}/values/${encodeURIComponent(sheetTitle)}`,
+            {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                signal: AbortSignal.timeout(10000),
+            },
+        );
+        if (!dataRes.ok) continue;
+        const data = await dataRes.json();
+
+        text += `## ${sheetTitle}\n\n`;
+        for (const row of data.values || []) {
+            text += (row as string[]).join(" | ") + "\n";
+        }
+        text += "\n";
+    }
+
+    return { text, title };
+}
+
+/**
+ * Fetch Google Slides content (titles + speaker notes).
+ */
+async function fetchViaSlides(docId: string, accessToken: string): Promise<{ text: string; title: string }> {
+    const res = await fetch(`https://slides.googleapis.com/v1/presentations/${docId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new Error(`Slides API: ${res.status}`);
+    const pres = await res.json();
+    const title = pres.title || `Presentation ${docId.slice(0, 8)}...`;
+
+    let text = `# ${title}\n\n`;
+    for (const [i, slide] of (pres.slides || []).entries()) {
+        text += `## Слайд ${i + 1}\n`;
+        // Extract text from shapes
+        for (const element of slide.pageElements || []) {
+            if (element.shape?.text?.textElements) {
+                for (const te of element.shape.text.textElements) {
+                    if (te.textRun?.content) {
+                        text += te.textRun.content;
+                    }
+                }
+            }
+        }
+        // Extract speaker notes
+        if (slide.slideProperties?.notesPage?.pageElements) {
+            for (const element of slide.slideProperties.notesPage.pageElements) {
+                if (element.shape?.text?.textElements) {
+                    text += "\n[Заметки докладчика]: ";
+                    for (const te of element.shape.text.textElements) {
+                        if (te.textRun?.content) {
+                            text += te.textRun.content;
+                        }
+                    }
+                }
+            }
+        }
+        text += "\n\n";
+    }
+
+    return { text, title };
+}
+
+/**
+ * Fetch document via public export URL (no OAuth needed).
+ */
+async function fetchViaPublicExport(docId: string): Promise<{ text: string; title: string }> {
+    const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=txt`;
+    const res = await fetch(exportUrl, {
+        signal: AbortSignal.timeout(15000),
+        headers: { "User-Agent": "VoiceZettel/3.0" },
+    });
+    if (!res.ok) {
+        throw new Error(`Public export failed (${res.status})`);
+    }
+    const text = await res.text();
+    const firstLine = text.split("\n").find((l) => l.trim().length > 0);
+    const title = firstLine && firstLine.trim().length < 100
+        ? firstLine.trim()
+        : `Document ${docId.slice(0, 8)}...`;
+    return { text, title };
+}
+
 export async function POST(request: Request) {
     try {
         const body = await request.json();
@@ -63,50 +219,67 @@ export async function POST(request: Request) {
             );
         }
 
-        // 1. Fetch document content via public export URL
-        const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=txt`;
+        const docType = detectDocType(rawId);
         let docText = "";
         let docTitle = `Document ${docId.slice(0, 8)}...`;
+        let fetchMethod: "oauth" | "public" = "public";
 
-        try {
-            const res = await fetch(exportUrl, {
-                signal: AbortSignal.timeout(15000),
-                headers: {
-                    "User-Agent": "VoiceZettel/3.0",
-                },
-            });
-            if (!res.ok) {
-                return NextResponse.json({
-                    status: "error",
-                    message: `Не удалось загрузить документ (${res.status}). Убедитесь, что документ доступен по ссылке.`,
-                    hint: "Сделайте документ публичным или настройте Google OAuth.",
-                }, { status: 422 });
+        // Try OAuth first (supports private docs)
+        const accessToken = await getValidAccessToken();
+        if (accessToken) {
+            try {
+                let result: { text: string; title: string };
+                if (docType === "sheet") {
+                    result = await fetchViaSheets(docId, accessToken);
+                } else if (docType === "slides") {
+                    result = await fetchViaSlides(docId, accessToken);
+                } else {
+                    result = await fetchViaDocsAPI(docId, accessToken);
+                }
+                docText = result.text;
+                docTitle = result.title;
+                fetchMethod = "oauth";
+            } catch (oauthErr) {
+                console.warn("[Workspace Sync] OAuth fetch failed, falling back to public export:", oauthErr);
             }
-            docText = await res.text();
-
-            // Try to extract title from first line
-            const firstLine = docText.split("\n").find((l) => l.trim().length > 0);
-            if (firstLine && firstLine.trim().length < 100) {
-                docTitle = firstLine.trim();
-            }
-        } catch (error) {
-            return NextResponse.json({
-                status: "error",
-                message: `Ошибка загрузки: ${error instanceof Error ? error.message : "unknown"}`,
-            }, { status: 502 });
         }
 
-        if (docText.trim().length < 50) {
+        // Fallback to public export (only works for public docs and only for Docs, not Sheets)
+        if (!docText && docType === "doc") {
+            try {
+                const result = await fetchViaPublicExport(docId);
+                docText = result.text;
+                docTitle = result.title;
+                fetchMethod = "public";
+            } catch {
+                return NextResponse.json({
+                    status: "error",
+                    message: "Не удалось загрузить документ. Убедитесь, что документ публичный или подключите Google аккаунт.",
+                    hint: accessToken ? "OAuth токен есть, но доступ к документу запрещён." : "Подключите Google аккаунт для доступа к приватным документам.",
+                }, { status: 422 });
+            }
+        }
+
+        if (!docText) {
             return NextResponse.json({
                 status: "error",
-                message: "Документ слишком короткий или пустой",
+                message: docType !== "doc"
+                    ? `Для ${docType === "sheet" ? "таблиц" : "презентаций"} нужна авторизация Google. Подключите аккаунт.`
+                    : "Документ пустой или недоступен.",
             }, { status: 422 });
         }
 
-        // 2. Chunk the text
+        if (docText.trim().length < 50) {
+            return NextResponse.json(
+                { status: "error", message: "Документ слишком короткий или пустой" },
+                { status: 422 },
+            );
+        }
+
+        // Chunk the text
         const chunks = chunkText(docText);
 
-        // 3. Try to index into ChromaDB via indexer service
+        // Index into ChromaDB via indexer service
         let indexedCount = 0;
         try {
             for (const [i, chunk] of chunks.entries()) {
@@ -116,12 +289,14 @@ export async function POST(request: Request) {
                     body: JSON.stringify({
                         content: chunk,
                         metadata: {
-                            source: `google-doc:${docId}`,
+                            source: `google-${docType}:${docId}`,
                             title: docTitle,
                             chunk_index: i,
                             total_chunks: chunks.length,
                             system_prompt: systemPrompt || "",
                             type: "workspace_document",
+                            doc_type: docType,
+                            fetch_method: fetchMethod,
                         },
                         collection: "workspace_docs",
                     }),
@@ -137,12 +312,14 @@ export async function POST(request: Request) {
             status: "ok",
             documentId: docId,
             documentTitle: docTitle,
+            documentType: docType,
+            fetchMethod,
             chunkCount: chunks.length,
             indexedCount,
             textLength: docText.length,
             message: indexedCount > 0
-                ? `Документ разбит на ${chunks.length} чанков, ${indexedCount} проиндексировано в ChromaDB.`
-                : `Документ разбит на ${chunks.length} чанков. Indexer не отвечает — чанки будут проиндексированы позже.`,
+                ? `✅ ${docType === "sheet" ? "Таблица" : docType === "slides" ? "Презентация" : "Документ"} "${docTitle}" разбит на ${chunks.length} чанков, ${indexedCount} проиндексировано в ChromaDB. (Метод: ${fetchMethod === "oauth" ? "Google API" : "публичный экспорт"})`
+                : `${docType === "sheet" ? "Таблица" : "Документ"} разбит на ${chunks.length} чанков. Indexer не отвечает — чанки будут проиндексированы позже.`,
         });
     } catch (error) {
         return NextResponse.json(
