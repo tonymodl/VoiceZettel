@@ -11,6 +11,10 @@ import {
     HeartPulse, Workflow, Satellite,
     Server, FileSearch, TextSearch, Sparkles, Monitor,
 } from "lucide-react";
+import { VoiceTasksPanel } from "./VoiceTasksPanel";
+import { VoicePipelineViz } from "./VoicePipelineViz";
+import { VoiceServicesHealth } from "./VoiceServicesHealth";
+import { SelfImprovingAnalytics } from "./SelfImprovingAnalytics";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -468,18 +472,33 @@ export function DashboardTab() {
 
         // 11) Google Workspace
         try {
-            const { latency } = await fetchWithTimeout("/api/workspace/sync", 3000).catch(() => ({ data: null, latency: -1 }));
-            // Workspace sync is POST-only, so a GET will 405 — that's actually fine, it means the route exists
-            results.push({
-                name: "Google Workspace",
-                nameRu: "Google Workspace",
-                icon: <Globe className={`size-4 ${latency > 0 ? "text-blue-400" : "text-zinc-500"}`} />,
-                status: "degraded",
-                latency: null,
-                details: "Ожидает OAuth настройки",
-                descRu: "⚠️ Google Workspace готов к подключению. Настройте OAuth credentials в .env для полной синхронизации документов.",
-                badge: "API",
-            });
+            const { data, latency } = await fetchWithTimeout("/api/auth/google/status", 3000);
+            const d = data as { connected: boolean; hasWriteAccess: boolean; email: string | null };
+            if (d.connected) {
+                results.push({
+                    name: "Google Workspace",
+                    nameRu: "Google Workspace",
+                    icon: <Globe className={`size-4 ${d.hasWriteAccess ? "text-blue-400" : "text-amber-400"}`} />,
+                    status: d.hasWriteAccess ? "online" : "degraded",
+                    latency,
+                    details: d.hasWriteAccess ? `✓ Чтение + запись | ${d.email}` : `⚠ Только чтение | ${d.email}`,
+                    descRu: d.hasWriteAccess
+                        ? `✅ Google подключён (${d.email}). Полный доступ к документам и таблицам. Ассистент может читать и редактировать файлы.`
+                        : `⚠️ Google подключён (${d.email}), но только для чтения. Перейдите в Настройки → Возможности ИИ → «Обновить доступ» для записи.`,
+                    badge: "API",
+                });
+            } else {
+                results.push({
+                    name: "Google Workspace",
+                    nameRu: "Google Workspace",
+                    icon: <Globe className="size-4 text-zinc-500" />,
+                    status: "degraded",
+                    latency,
+                    details: "Не подключён",
+                    descRu: "⚠️ Google не подключён. Перейдите: /api/auth/google для авторизации.",
+                    badge: "API",
+                });
+            }
         } catch {
             results.push({
                 name: "Google Workspace",
@@ -488,7 +507,7 @@ export function DashboardTab() {
                 status: "degraded",
                 latency: null,
                 details: "Не настроен",
-                descRu: "⚠️ Google Workspace ожидает настройки OAuth. Перейдите во вкладку Документы для подключения.",
+                descRu: "⚠️ Google Workspace ожидает настройки OAuth. Перейдите в Настройки → Возможности ИИ → подключить Google.",
                 badge: "API",
             });
         }
@@ -794,34 +813,94 @@ export function DashboardTab() {
                 </div>
             </div>
 
-            {/* ── Heal Log (if any) ───────────────────── */}
-            {healLog && (
-                <div className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.04] p-4 backdrop-blur">
-                    <div className="mb-3 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <Wrench className="size-5 text-amber-400" />
-                            <span className="text-sm font-bold text-zinc-200">Результат автолечения</span>
-                        </div>
-                        <button
-                            onClick={() => setHealLog(null)}
-                            className="rounded-lg px-2.5 py-1 text-xs text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
-                        >✕ Скрыть</button>
-                    </div>
-                    <div className="space-y-2">
-                        {healLog.map((a, i) => (
-                            <div key={i} className="flex items-start gap-2.5 text-sm">
-                                {a.success
-                                    ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-400" />
-                                    : <XCircle className="mt-0.5 size-4 shrink-0 text-red-400" />
-                                }
-                                <span className={a.success ? "text-zinc-400" : "text-red-300"}>
-                                    <strong className="text-zinc-200">{a.service}:</strong> {a.descRu}
-                                </span>
+            {/* ══════════════════════════════════════════
+                SELF-HEALING — Always visible diagnostics section
+               ══════════════════════════════════════════ */}
+            <section>
+                <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-500/[0.04] to-transparent p-5 backdrop-blur">
+                    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="flex size-10 items-center justify-center rounded-xl bg-violet-500/15">
+                                <Wrench className="size-5 text-violet-400" />
                             </div>
-                        ))}
+                            <div>
+                                <h3 className="text-sm font-bold text-zinc-100">🏥 Самоисцеление системы</h3>
+                                <p className="text-xs text-zinc-500">
+                                    Автодиагностика и перезапуск упавших сервисов
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={handleHeal}
+                                disabled={isHealing}
+                                className="flex items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm font-semibold text-violet-400 transition-all hover:bg-violet-500/20 hover:shadow-lg hover:shadow-violet-500/5 active:scale-[0.97] disabled:opacity-50"
+                            >
+                                {isHealing ? <Loader2 className="size-4 animate-spin" /> : <Wrench className="size-4" />}
+                                {isHealing ? "Диагностика..." : "🔧 Запустить диагностику + лечение"}
+                            </button>
+                        </div>
                     </div>
+
+                    {/* Status indicators */}
+                    <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3 text-center">
+                            <p className="text-lg font-bold text-emerald-400">{onlineCount}</p>
+                            <p className="text-[10px] text-zinc-500">Онлайн</p>
+                        </div>
+                        <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3 text-center">
+                            <p className="text-lg font-bold text-amber-400">{nodes.filter(n => n.status === "degraded").length}</p>
+                            <p className="text-[10px] text-zinc-500">Частично</p>
+                        </div>
+                        <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3 text-center">
+                            <p className="text-lg font-bold text-red-400">{nodes.filter(n => n.status === "offline").length}</p>
+                            <p className="text-[10px] text-zinc-500">Оффлайн</p>
+                        </div>
+                        <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3 text-center">
+                            <p className="text-lg font-bold text-zinc-300">{totalCount}</p>
+                            <p className="text-[10px] text-zinc-500">Всего</p>
+                        </div>
+                    </div>
+
+                    {/* Heal Log */}
+                    {healLog && (
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+                            <div className="mb-3 flex items-center justify-between">
+                                <span className="text-xs font-bold text-zinc-300">📋 Результат последнего лечения:</span>
+                                <button
+                                    onClick={() => setHealLog(null)}
+                                    className="rounded-lg px-2.5 py-1 text-xs text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
+                                >✕ Скрыть</button>
+                            </div>
+                            <div className="space-y-2">
+                                {healLog.map((a, i) => (
+                                    <div key={i} className="flex items-start gap-2.5 text-sm">
+                                        {a.success
+                                            ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-400" />
+                                            : <XCircle className="mt-0.5 size-4 shrink-0 text-red-400" />
+                                        }
+                                        <span className={a.success ? "text-zinc-400" : "text-red-300"}>
+                                            <strong className="text-zinc-200">{a.service}:</strong> {a.descRu}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {!healLog && (
+                        <p className="text-center text-[11px] text-zinc-600">
+                            Нажмите кнопку выше для запуска полной диагностики всех сервисов и автоматического перезапуска упавших.
+                        </p>
+                    )}
                 </div>
-            )}
+            </section>
+
+            {/* ══════════════════════════════════════════
+                WATCHDOG DAEMON — Background service monitor
+               ══════════════════════════════════════════ */}
+            <WatchdogWidget />
 
             {/* ══════════════════════════════════════════
                 PRIORITY 1 — Voice Assistant (main product)
@@ -898,6 +977,26 @@ export function DashboardTab() {
                     )}
                 </div>
             </section>
+
+            {/* ══════════════════════════════════════════
+                VOICE SERVICES HEALTH — Detailed health checks
+               ══════════════════════════════════════════ */}
+            <VoiceServicesHealth />
+
+            {/* ══════════════════════════════════════════
+                VOICE PIPELINE — Data flow visualization
+               ══════════════════════════════════════════ */}
+            <VoicePipelineViz />
+
+            {/* ══════════════════════════════════════════
+                VOICE TASKS — Tasks from assistant
+               ══════════════════════════════════════════ */}
+            <VoiceTasksPanel />
+
+            {/* ══════════════════════════════════════════
+                SELF-IMPROVING ANALYTICS — Satisfaction trends
+               ══════════════════════════════════════════ */}
+            <SelfImprovingAnalytics />
 
             {/* ══════════════════════════════════════════
                 PRIORITY 2 — Service Health Grid
@@ -1450,3 +1549,140 @@ export function DashboardTab() {
     );
 }
 
+// ── Watchdog Widget ─────────────────────────────────────────
+
+interface WatchdogData {
+    running: boolean;
+    lastCheck: number;
+    allHealthy: boolean;
+    servicesOnline: number;
+    servicesTotal: number;
+    circuitBreakers: Record<string, { state: string; failCount: number; lastFail: number }>;
+    context: {
+        goldenCircle: number;
+        goldenCircleNames: string[];
+        cacheEntries: number;
+        cachedKeys: string[];
+    };
+}
+
+function WatchdogWidget() {
+    const [data, setData] = useState<WatchdogData | null>(null);
+
+    useEffect(() => {
+        const fetchWatchdog = async () => {
+            try {
+                const res = await fetch("/api/health", { cache: "no-store", signal: AbortSignal.timeout(4000) });
+                if (res.ok) {
+                    const json = await res.json();
+                    setData({
+                        running: json.watchdog?.running ?? false,
+                        lastCheck: json.watchdog?.lastCheck ?? 0,
+                        allHealthy: json.watchdog?.allHealthy ?? true,
+                        servicesOnline: json.watchdog?.servicesOnline ?? 0,
+                        servicesTotal: json.watchdog?.servicesTotal ?? 0,
+                        circuitBreakers: json.circuitBreakers ?? {},
+                        context: json.context ?? { goldenCircle: 0, goldenCircleNames: [], cacheEntries: 0, cachedKeys: [] },
+                    });
+                }
+            } catch { /* silent */ }
+        };
+
+        fetchWatchdog();
+        const interval = setInterval(fetchWatchdog, 10000);
+        return () => clearInterval(interval);
+    }, []);
+
+    if (!data) return null;
+
+    const openBreakers = Object.entries(data.circuitBreakers).filter(([, v]) => v.state === "OPEN");
+
+    return (
+        <section>
+            <div className="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/[0.04] to-transparent p-5 backdrop-blur">
+                <div className="mb-4 flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-xl bg-cyan-500/15">
+                        <Activity className="size-5 text-cyan-400" />
+                    </div>
+                    <div>
+                        <h3 className="text-sm font-bold text-zinc-100">🐕 Watchdog {data.running ? "(активен)" : "(остановлен)"}</h3>
+                        <p className="text-xs text-zinc-500">
+                            Фоновый мониторинг сервисов + circuit breakers + контекст
+                        </p>
+                    </div>
+                    {data.running && (
+                        <span className={`ml-auto rounded-full border px-3 py-1 text-xs font-bold ${
+                            data.allHealthy
+                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                                : "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                        }`}>
+                            {data.allHealthy ? "✅ Все ОК" : `⚠ ${data.servicesOnline}/${data.servicesTotal}`}
+                        </span>
+                    )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    {/* Golden Circle */}
+                    <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3">
+                        <div className="flex items-center gap-2 mb-1">
+                            <Users className="size-3.5 text-amber-400" />
+                            <span className="text-[11px] font-bold text-zinc-300">Golden Circle</span>
+                        </div>
+                        <p className="text-lg font-bold text-amber-400">{data.context.goldenCircle}</p>
+                        <p className="text-[10px] text-zinc-500 truncate">{data.context.goldenCircleNames.slice(0, 3).join(", ")}...</p>
+                    </div>
+
+                    {/* Context Cache */}
+                    <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3">
+                        <div className="flex items-center gap-2 mb-1">
+                            <Database className="size-3.5 text-violet-400" />
+                            <span className="text-[11px] font-bold text-zinc-300">Кеш контекста</span>
+                        </div>
+                        <p className="text-lg font-bold text-violet-400">{data.context.cacheEntries}</p>
+                        <p className="text-[10px] text-zinc-500">записей в LRU</p>
+                    </div>
+
+                    {/* Circuit Breakers */}
+                    <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3">
+                        <div className="flex items-center gap-2 mb-1">
+                            <Zap className="size-3.5 text-emerald-400" />
+                            <span className="text-[11px] font-bold text-zinc-300">Circuit Breakers</span>
+                        </div>
+                        <p className={`text-lg font-bold ${openBreakers.length > 0 ? "text-red-400" : "text-emerald-400"}`}>
+                            {openBreakers.length > 0 ? `${openBreakers.length} OPEN` : "ALL OK"}
+                        </p>
+                        <p className="text-[10px] text-zinc-500">
+                            {Object.keys(data.circuitBreakers).length} инструментов
+                        </p>
+                    </div>
+
+                    {/* Watchdog Timer */}
+                    <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3">
+                        <div className="flex items-center gap-2 mb-1">
+                            <Clock className="size-3.5 text-cyan-400" />
+                            <span className="text-[11px] font-bold text-zinc-300">Последняя проверка</span>
+                        </div>
+                        <p className="text-sm font-bold text-cyan-400">
+                            {data.lastCheck > 0 ? `${Math.round((Date.now() - data.lastCheck) / 1000)}с назад` : "—"}
+                        </p>
+                        <p className="text-[10px] text-zinc-500">каждые 30с</p>
+                    </div>
+                </div>
+
+                {/* Open circuit breakers warning */}
+                {openBreakers.length > 0 && (
+                    <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-2">
+                        <p className="text-xs font-bold text-red-400">⚠️ Заблокированные инструменты:</p>
+                        <div className="mt-1 flex flex-wrap gap-2">
+                            {openBreakers.map(([name, info]) => (
+                                <span key={name} className="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[10px] font-mono text-red-300">
+                                    {name} ({info.failCount} ошибок)
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
+        </section>
+    );
+}

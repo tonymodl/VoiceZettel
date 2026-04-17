@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import { logger } from "@/lib/logger";
+import { readPrewarmCache, invalidatePrewarmCache } from "@/hooks/usePrewarmer";
 
 /* ------------------------------------------------------------------ */
 /*  Types for Gemini Live WebSocket protocol                          */
@@ -19,6 +20,8 @@ interface GeminiSetupMessage {
             };
         };
         system_instruction?: { parts: { text: string }[] };
+        input_audio_transcription?: Record<string, never>;
+        output_audio_transcription?: Record<string, never>;
     };
 }
 
@@ -45,12 +48,22 @@ interface GeminiServerMessage {
             parts?: GeminiPart[];
         };
         turnComplete?: boolean;
+        inputTranscription?: { text: string };
+        outputTranscription?: { text: string };
     };
 }
 
 interface TokenResponse {
     wsUrl: string;
-    model: string;
+    model?: string;
+    vaultContext?: string;
+    compiledRules?: string;
+    empathyBlock?: string;
+    contextSummary?: {
+        totalTokens: number;
+        maxTokens: number;
+        percentUsed: number;
+    };
 }
 
 /* ------------------------------------------------------------------ */
@@ -97,18 +110,36 @@ function int16ToFloat32(int16: Int16Array): Float32Array {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Constants                                                          */
+/* ------------------------------------------------------------------ */
+
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_BASE_DELAY_MS = 1000;
+
+/* ------------------------------------------------------------------ */
 /*  Hook                                                               */
 /* ------------------------------------------------------------------ */
 
 export function useGeminiLiveSession() {
     const [isConnected, setIsConnected] = useState(false);
     const [transcript, setTranscript] = useState("");
+    const [isReconnecting, setIsReconnecting] = useState(false);
 
     const wsRef = useRef<WebSocket | null>(null);
     const micStreamRef = useRef<MediaStream | null>(null);
     const micAudioCtxRef = useRef<AudioContext | null>(null);
     const processorRef = useRef<ScriptProcessorNode | null>(null);
     const playbackCtxRef = useRef<AudioContext | null>(null);
+
+    // Auto-reconnect state
+    const intentionalCloseRef = useRef(false);
+    const retryCountRef = useRef(0);
+    const lastSystemPromptRef = useRef<string | undefined>(undefined);
+    const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Session transcript for post-session analysis
+    const sessionTranscriptRef = useRef<string[]>([]);
+    const sessionStartRef = useRef<string>("");
 
     /* ── Play received PCM audio ── */
     const playPcmAudio = useCallback((base64Data: string) => {
@@ -140,7 +171,22 @@ export function useGeminiLiveSession() {
 
                 if (msg.setupComplete) {
                     logger.info("[GeminiLive] Setup complete, session ready");
+                    retryCountRef.current = 0; // Reset retry count on successful setup
+                    setIsReconnecting(false);
                     return;
+                }
+
+                // Track input transcription (what user said)
+                if (msg.serverContent?.inputTranscription?.text) {
+                    const userText = msg.serverContent.inputTranscription.text;
+                    sessionTranscriptRef.current.push(`USER: ${userText}`);
+                    setTranscript((prev) => prev + `\n[You]: ${userText}`);
+                }
+
+                // Track output transcription (what assistant said)
+                if (msg.serverContent?.outputTranscription?.text) {
+                    const assistantText = msg.serverContent.outputTranscription.text;
+                    sessionTranscriptRef.current.push(`ASSISTANT: ${assistantText}`);
                 }
 
                 const parts = msg.serverContent?.modelTurn?.parts;
@@ -161,40 +207,170 @@ export function useGeminiLiveSession() {
         [playPcmAudio],
     );
 
+    /* ── Post-session analytics trigger ── */
+    const triggerSessionAnalysis = useCallback(async () => {
+        const lines = sessionTranscriptRef.current;
+        if (lines.length < 2) return; // Nothing meaningful to analyze
+
+        const fullTranscript = lines.join("\n");
+        const sessionStart = sessionStartRef.current;
+
+        try {
+            await fetch("/api/session-analytics", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    transcript: fullTranscript,
+                    sessionStart,
+                    sessionEnd: new Date().toISOString(),
+                    userId: "anonymous", // Will be overridden server-side
+                }),
+            });
+            logger.info("[GeminiLive] Session analytics submitted");
+        } catch (err) {
+            logger.error("[GeminiLive] Failed to submit session analytics:", err);
+        }
+
+        // Reset for next session
+        sessionTranscriptRef.current = [];
+    }, []);
+
+    /* ── Cleanup mic resources ── */
+    const cleanupMic = useCallback(() => {
+        if (processorRef.current) {
+            processorRef.current.disconnect();
+            processorRef.current = null;
+        }
+        if (micAudioCtxRef.current && micAudioCtxRef.current.state !== "closed") {
+            micAudioCtxRef.current.close().catch(() => { /* silent */ });
+            micAudioCtxRef.current = null;
+        }
+        if (micStreamRef.current) {
+            micStreamRef.current.getTracks().forEach((t) => t.stop());
+            micStreamRef.current = null;
+        }
+    }, []);
+
     /* ── Connect ── */
     const connect = useCallback(
         async (systemPrompt?: string) => {
-            // 1. СНАЧАЛА микрофон — в user gesture context (до любых async)
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    sampleRate: 16000,
-                    channelCount: 1,
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                },
-            });
-            micStreamRef.current = stream;
+            // Save for reconnection
+            lastSystemPromptRef.current = systemPrompt;
+            intentionalCloseRef.current = false;
+            sessionStartRef.current = new Date().toISOString();
 
-            // 2. Fetch token / wsUrl
-            const res = await fetch("/api/gemini-live-token", { method: "POST" });
-            if (!res.ok) {
-                stream.getTracks().forEach((t) => t.stop());
-                const body = await res.text();
-                throw new Error(`Token fetch failed: ${body}`);
+            const connectStart = performance.now();
+
+            // ══════ FAST PATH: Use prewarm cache if available ══════
+            const cache = readPrewarmCache();
+            const cacheAge = Date.now() - cache.timestamp;
+            const cacheValid = cacheAge < 4 * 60 * 1000; // 4 min TTL
+
+            let stream: MediaStream;
+            let tokenData: TokenResponse;
+
+            if (cacheValid && cache.micStream && cache.geminiToken) {
+                // ⚡ FAST PATH — use cached mic + token
+                logger.info(`[GeminiLive] ⚡ Using prewarm cache (age: ${(cacheAge / 1000).toFixed(1)}s)`);
+                stream = cache.micStream;
+                // Re-enable tracks (prewarmer disables them)
+                stream.getTracks().forEach((t) => { t.enabled = true; });
+                micStreamRef.current = stream;
+
+                tokenData = {
+                    wsUrl: cache.geminiToken.wsUrl,
+                    vaultContext: cache.geminiToken.vaultContext,
+                    compiledRules: cache.geminiToken.compiledRules,
+                    empathyBlock: cache.geminiToken.empathyBlock,
+                };
+
+                // Invalidate cache so next connect gets fresh data
+                invalidatePrewarmCache();
+            } else {
+                // 🔄 PARALLEL PATH — mic + token simultaneously
+                logger.info("[GeminiLive] No valid cache, fetching mic + token in parallel");
+
+                const [micResult, tokenResult] = await Promise.allSettled([
+                    navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            sampleRate: 16000,
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                        },
+                    }),
+                    fetch("/api/gemini-live-token", { method: "POST" }),
+                ]);
+
+                // Check mic
+                if (micResult.status === "rejected") {
+                    throw new Error(`Microphone error: ${micResult.reason}`);
+                }
+                stream = micResult.value;
+                micStreamRef.current = stream;
+
+                // Check token
+                if (tokenResult.status === "rejected") {
+                    stream.getTracks().forEach((t) => t.stop());
+                    throw new Error(`Token fetch failed: ${tokenResult.reason}`);
+                }
+                const res = tokenResult.value;
+                if (!res.ok) {
+                    stream.getTracks().forEach((t) => t.stop());
+                    const body = await res.text();
+                    throw new Error(`Token fetch failed: ${body}`);
+                }
+                tokenData = (await res.json()) as TokenResponse;
             }
-            const { wsUrl, model } = (await res.json()) as TokenResponse;
 
-            // 3. Open WebSocket
-            const ws = new WebSocket(wsUrl);
+            const fetchMs = (performance.now() - connectStart).toFixed(0);
+            logger.info(`[GeminiLive] Mic + token ready in ${fetchMs}ms`);
+
+            // 3. Build enriched system prompt with memory + empathy
+            const memoryParts: string[] = [];
+
+            // Compiled behavior rules (from requirementsSynthesizer) — HIGHEST PRIORITY
+            if (tokenData.compiledRules) {
+                memoryParts.push(
+                    `⚠️ ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА ВЛАДЕЛЬЦА (нарушение = критическая ошибка):\n${tokenData.compiledRules}`,
+                );
+            }
+
+            // Empathy profile (auto-evolved from past sessions)
+            if (tokenData.empathyBlock) {
+                memoryParts.push(tokenData.empathyBlock);
+            }
+
+            // User-provided system prompt or default
+            if (systemPrompt) {
+                memoryParts.push(systemPrompt);
+            }
+
+            // Vault + ChromaDB context (assembled by contextManager)
+            if (tokenData.vaultContext) {
+                memoryParts.push(tokenData.vaultContext);
+            }
+
+            const fullSystemPrompt = memoryParts.join("\n\n═══════════════════════════════════════════════\n\n");
+
+            if (tokenData.contextSummary) {
+                logger.info(
+                    `[GeminiLive] Context loaded: ${tokenData.contextSummary.totalTokens}t (${tokenData.contextSummary.percentUsed.toFixed(1)}%)`,
+                );
+            }
+
+            // 4. Open WebSocket
+            const ws = new WebSocket(tokenData.wsUrl);
             wsRef.current = ws;
 
             ws.onopen = () => {
-                logger.info("[GeminiLive] WebSocket connected, sending setup");
+                const totalMs = (performance.now() - connectStart).toFixed(0);
+                logger.info(`[GeminiLive] WebSocket connected in ${totalMs}ms total, sending setup`);
 
-                // Send setup message
+                // Send setup message with full memory-enriched prompt
                 const setupMsg: GeminiSetupMessage = {
                     setup: {
-                        model: `models/${model}`,
+                        model: `models/${tokenData.model ?? "gemini-2.5-flash-native-audio-latest"}`,
                         generation_config: {
                             response_modalities: ["AUDIO"],
                             speech_config: {
@@ -203,12 +379,14 @@ export function useGeminiLiveSession() {
                                 },
                             },
                         },
+                        input_audio_transcription: {},
+                        output_audio_transcription: {},
                     },
                 };
 
-                if (systemPrompt) {
+                if (fullSystemPrompt) {
                     setupMsg.setup.system_instruction = {
-                        parts: [{ text: systemPrompt }],
+                        parts: [{ text: fullSystemPrompt }],
                     };
                 }
 
@@ -226,13 +404,43 @@ export function useGeminiLiveSession() {
                 logger.error("[GeminiLive] WebSocket error:", ev);
             };
 
-            ws.onclose = () => {
-                logger.info("[GeminiLive] WebSocket closed");
+            ws.onclose = (ev) => {
+                logger.info(`[GeminiLive] WebSocket closed: code=${ev.code} reason=${ev.reason}`);
                 setIsConnected(false);
                 cleanupMic();
+
+                // Auto-reconnect with exponential backoff (5 attempts, max 16s)
+                if (!intentionalCloseRef.current && retryCountRef.current < MAX_RECONNECT_ATTEMPTS) {
+                    const delay = Math.min(
+                        RECONNECT_BASE_DELAY_MS * Math.pow(2, retryCountRef.current),
+                        16000,
+                    );
+                    retryCountRef.current++;
+                    setIsReconnecting(true);
+                    logger.warn(
+                        `[GeminiLive] ⚡ Reconnecting ${retryCountRef.current}/${MAX_RECONNECT_ATTEMPTS} in ${delay}ms (code=${ev.code})`,
+                    );
+
+                    reconnectTimerRef.current = setTimeout(() => {
+                        connect(lastSystemPromptRef.current).catch((err) => {
+                            logger.error("[GeminiLive] Reconnect failed:", err);
+                            if (retryCountRef.current >= MAX_RECONNECT_ATTEMPTS) {
+                                setIsReconnecting(false);
+                                logger.error("[GeminiLive] ❌ Max reconnect attempts reached. Voice assistant stopped.");
+                            }
+                        });
+                    }, delay);
+                } else if (intentionalCloseRef.current) {
+                    // Intentional disconnect — trigger session analytics
+                    void triggerSessionAnalysis();
+                } else {
+                    // All retries exhausted
+                    setIsReconnecting(false);
+                    logger.error("[GeminiLive] ❌ All reconnect attempts exhausted. Tap orb to restart.");
+                }
             };
         },
-        [handleMessage],
+        [handleMessage, cleanupMic, triggerSessionAnalysis],
     );
 
     /* ── Microphone capture ── */
@@ -270,24 +478,17 @@ export function useGeminiLiveSession() {
         processor.connect(ctx.destination);
     };
 
-    /* ── Cleanup mic resources ── */
-    const cleanupMic = useCallback(() => {
-        if (processorRef.current) {
-            processorRef.current.disconnect();
-            processorRef.current = null;
-        }
-        if (micAudioCtxRef.current && micAudioCtxRef.current.state !== "closed") {
-            micAudioCtxRef.current.close().catch(() => { /* silent */ });
-            micAudioCtxRef.current = null;
-        }
-        if (micStreamRef.current) {
-            micStreamRef.current.getTracks().forEach((t) => t.stop());
-            micStreamRef.current = null;
-        }
-    }, []);
-
     /* ── Disconnect ── */
     const disconnect = useCallback(() => {
+        intentionalCloseRef.current = true;
+        retryCountRef.current = MAX_RECONNECT_ATTEMPTS; // Prevent any pending reconnect
+
+        // Cancel pending reconnect timer
+        if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+        }
+
         cleanupMic();
 
         if (playbackCtxRef.current && playbackCtxRef.current.state !== "closed") {
@@ -301,7 +502,8 @@ export function useGeminiLiveSession() {
         }
 
         setIsConnected(false);
+        setIsReconnecting(false);
     }, [cleanupMic]);
 
-    return { connect, disconnect, isConnected, transcript } as const;
+    return { connect, disconnect, isConnected, isReconnecting, transcript } as const;
 }

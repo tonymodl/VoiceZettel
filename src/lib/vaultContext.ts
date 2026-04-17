@@ -62,11 +62,25 @@ export async function loadVaultContext(_userId: string): Promise<string> {
         const chunks: string[] = [];
         let totalChars = 0;
 
-        // 1. Zettelkasten notes (highest priority)
-        const zettelDir = join(VAULT_PATH, "🗃 Zettelkasten");
-        const zettelFiles = await collectMdFiles(zettelDir);
+        // 1. Zettelkasten notes (highest priority) — includes subdirs
+        const zettelDirs = [
+            join(VAULT_PATH, "🗃 Zettelkasten"),
+            join(VAULT_PATH, "🗃 Zettelkasten", "ideas"),
+            join(VAULT_PATH, "🗃 Zettelkasten", "facts"),
+            join(VAULT_PATH, "🗃 Zettelkasten", "persons"),
+            join(VAULT_PATH, "🗃 Zettelkasten", "tasks"),
+            join(VAULT_PATH, "🗃 Zettelkasten", "Zettelkasten"),
+        ];
 
-        for (const filePath of zettelFiles) {
+        const allZettelFiles: string[] = [];
+        for (const dir of zettelDirs) {
+            const files = await collectMdFiles(dir);
+            allZettelFiles.push(...files);
+        }
+        // Deduplicate (recursive scan may re-discover subdirs)
+        const uniqueZettelFiles = [...new Set(allZettelFiles)];
+
+        for (const filePath of uniqueZettelFiles) {
             if (totalChars >= MAX_CONTEXT_CHARS) break;
             try {
                 const content = await readFile(filePath, "utf-8");
@@ -77,6 +91,28 @@ export async function loadVaultContext(_userId: string): Promise<string> {
             } catch {
                 // Skip unreadable files
             }
+        }
+
+        // 1b. Root-level notes (Vault root .md files)
+        try {
+            const rootFiles = await collectMdFiles(VAULT_PATH);
+            const rootOnlyFiles = rootFiles.filter(
+                (f) => !f.includes("🗃") && !f.includes("📝") && !f.includes("📬") && !f.includes(".obsidian"),
+            );
+            for (const filePath of rootOnlyFiles.slice(0, 10)) {
+                if (totalChars >= MAX_CONTEXT_CHARS) break;
+                try {
+                    const content = await readFile(filePath, "utf-8");
+                    const relativePath = filePath.replace(VAULT_PATH, "").replace(/\\/g, "/");
+                    const chunk = `\n--- ${relativePath} ---\n${content.trim().slice(0, 2000)}\n`;
+                    chunks.push(chunk);
+                    totalChars += chunk.length;
+                } catch {
+                    // Skip
+                }
+            }
+        } catch {
+            // Root scan failed — skip
         }
 
         // 2. Recent sessions (last 3 days only — keep context small)
@@ -109,7 +145,7 @@ export async function loadVaultContext(_userId: string): Promise<string> {
         cache.timestamp = Date.now();
 
         logger.info(
-            `Vault context: ${zettelFiles.length} zettel notes + ${sessionFiles.length} sessions, ${totalChars} chars`,
+            `Vault context: ${uniqueZettelFiles.length} zettel notes + ${sessionFiles.length} sessions, ${totalChars} chars`,
         );
 
         return result;
@@ -130,9 +166,14 @@ export async function loadVaultNotes(
     if (!VAULT_PATH) return [];
 
     try {
-        // Load from all directories
+        // Load from all Zettelkasten subdirectories + sessions + root notes
         const dirs = [
             join(VAULT_PATH, "🗃 Zettelkasten"),
+            join(VAULT_PATH, "🗃 Zettelkasten", "ideas"),
+            join(VAULT_PATH, "🗃 Zettelkasten", "facts"),
+            join(VAULT_PATH, "🗃 Zettelkasten", "persons"),
+            join(VAULT_PATH, "🗃 Zettelkasten", "tasks"),
+            join(VAULT_PATH, "🗃 Zettelkasten", "Zettelkasten"),
             join(VAULT_PATH, "📝 Сессии"),
         ];
 

@@ -9,6 +9,7 @@ import {
     searchMemories,
 } from "@/lib/memoryStore";
 import { writeNoteToVault } from "@/lib/vaultWriter";
+import { webSearch } from "@/lib/webSearch";
 import type { ToolCall } from "@/lib/providers/base";
 
 // ── Function calling tool definitions ────────────────────────
@@ -109,6 +110,24 @@ export const MEMORY_TOOLS = [
                     },
                 },
                 required: ["title", "essence", "action", "tags", "compass", "context", "noteType"],
+            },
+        },
+    },
+    {
+        type: "function" as const,
+        function: {
+            name: "web_search",
+            description:
+                "Поиск актуальной информации в интернете. ОБЯЗАТЕЛЬНО используй когда вопрос касается: погоды, курсов валют, новостей, спортивных результатов, текущих событий, цен, расписаний, любой информации которая может измениться со временем. НЕ выдумывай актуальные данные — всегда вызывай эту функцию.",
+            parameters: {
+                type: "object",
+                properties: {
+                    query: {
+                        type: "string",
+                        description: "Поисковый запрос на русском или английском языке",
+                    },
+                },
+                required: ["query"],
             },
         },
     },
@@ -232,6 +251,27 @@ ${action}
                     }),
                 });
                 logger.debug(`Zettel queued: "${safeTitle}" [${noteType}]`);
+            } else if (tc.function.name === "web_search") {
+                const query = args.query as string;
+                if (!query) {
+                    results.push({
+                        role: "tool",
+                        tool_call_id: tc.id,
+                        content: JSON.stringify({ error: "Query is required" }),
+                    });
+                } else {
+                    const searchResult = await webSearch(query);
+                    results.push({
+                        role: "tool",
+                        tool_call_id: tc.id,
+                        content: JSON.stringify({
+                            results: searchResult.results,
+                            query: searchResult.query,
+                            source: searchResult.source,
+                        }),
+                    });
+                    logger.info(`[webSearch] Tool call: "${query}" → ${searchResult.results.length} results`);
+                }
             }
         } catch (err) {
             results.push({

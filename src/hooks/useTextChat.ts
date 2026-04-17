@@ -170,8 +170,8 @@ export function useTextChat() {
                                 parsed.choices?.[0]?.delta?.content;
                             if (content) {
                                 accumulated += content;
-                                // Strip DSML and counter tags in real-time
-                                const display = stripPrefTag(stripCounterTag(stripDSML(accumulated)));
+                                // Strip DSML and pref tags in real-time (keep counter tags for badge rendering)
+                                const display = stripPrefTag(stripDSML(accumulated));
                                 updateLastAssistantMessage({
                                     content: display,
                                 });
@@ -209,9 +209,9 @@ export function useTextChat() {
                                 .incrementCustomWidget(ct);
                         }
                     }
-                    // Strip tags from displayed message
-                    const cleaned = stripCounterTag(accumulated);
-                    updateLastAssistantMessage({ content: cleaned });
+                    // Keep counter tags in displayed message for badge rendering
+                    const displayWithBadges = stripPrefTag(stripDSML(accumulated));
+                    updateLastAssistantMessage({ content: displayWithBadges });
                 }
 
                 // ── Auto-send to Obsidian (fire-and-forget) ──

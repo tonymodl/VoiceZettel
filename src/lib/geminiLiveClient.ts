@@ -4,6 +4,9 @@
 // Barge-in: если RMS микрофона > высокого порога — пользователь перебивает.
 
 import { logger } from "@/lib/logger";
+import { useSettingsStore } from "@/stores/settingsStore";
+import { formatBangkokNow } from "@/lib/timezone";
+import { canCallTool, recordSuccess, recordFailure, getBlockedMessage } from "@/lib/circuitBreaker";
 
 // Высокий порог RMS для barge-in (отсекает эхо динамика, реагирует на голос)
 const BARGE_IN_RMS_THRESHOLD = 0.15;
@@ -17,12 +20,17 @@ let nextPlayTime = 0;
 let isSpeaking = false;
 let scheduledSources: AudioBufferSourceNode[] = [];
 
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_BASE_MS = 1000;
+
 interface GeminiLiveOptions {
     wsUrl: string;
     micStream: MediaStream;
     vaultContext: string;
     onTranscript: (text: string) => void;
     onOrbState: (state: "listening" | "thinking" | "speaking" | "idle") => void;
+    onOrbContext?: (ctx: "" | "web" | "tool") => void;
     onAudioLevel: (level: number) => void;
     onMessage: (userText: string, assistantText: string) => void;
     onLog: (msg: string, data?: unknown) => void;
@@ -33,7 +41,13 @@ interface GeminiLiveOptions {
         voiceSystemStatus: boolean;
         voiceUrlAccess: boolean;
         voiceTaskManagement: boolean;
+        voiceGoogleDocs: boolean;
+        voiceGoogleCalendar: boolean;
     };
+    /** Compiled user behavior rules from RequirementsSynthesizer */
+    compiledRules?: string;
+    /** Empathy profile block from server */
+    empathyBlock?: string;
 }
 
 function stopPlayback() {
@@ -91,10 +105,75 @@ function condenseVaultContext(rawContext: string): string {
     return condensed.join("\n");
 }
 
-function buildSystemInstruction(vaultContext: string): string {
-    const base = `Ты — VoiceZettel, приватный голосовой экзокортекс и AI-менеджер Антона Евсина. Отвечай ТОЛЬКО на русском. Будь краток (1-3 предложения), но по запросу давай детальные отчёты.
+function buildSystemInstruction(vaultContext: string, compiledRules?: string, empathyBlock?: string): string {
+    // NOTE: Golden Context (Настя, Костя, Dominion) is injected server-side
+    // in gemini-live-token route → arrives as part of vaultContext string.
+
+    // ═══ ANTI-HALLUCINATION BLOCK (HIGHEST PRIORITY — FIRST IN PROMPT) ═══
+    const antiHallucinationBlock = `═══ АБСОЛЮТНЫЙ ЗАПРЕТ ГАЛЛЮЦИНАЦИЙ (НЕИЗМЕНЯЕМЫЙ) ═══
+🚫 ЕСЛИ ты НЕ ЗНАЕШЬ — скажи «Не знаю, давай поищу» и вызови search_knowledge
+🚫 НИКОГДА не выдумывай имена, даты, факты, цифры
+🚫 НИКОГДА не придумывай названия проектов, компаний, продуктов
+🚫 Если данных нет — так и скажи. Лучше молчание чем ложь
+🚫 Все ответы о фактах ДОЛЖНЫ быть основаны на search_knowledge или browse_url
+═══════════════════════════════════════════════
+
+═══ ВЕРИФИКАЦИЯ ИНСТРУМЕНТОВ (НЕИЗМЕНЯЕМЫЙ) ═══
+⚠️ НИКОГДА не говори «Сохранила» пока не получишь ОТВЕТ от инструмента
+⚠️ Если инструмент вернул error — сообщи: «Не получилось: [причина]»
+⚠️ Если search_knowledge вернул 0 результатов — скажи «Ничего не нашла», НЕ выдумывай
+⚠️ При отправке Telegram — ДОЖДИСЬ подтверждения перед «Отправила»
+═══════════════════════════════════════════════
+
+═══ АНТИ-ПЕТЛЯ (НЕИЗМЕНЯЕМЫЙ) ═══
+🚫 ЗАПРЕЩЕНО повторять одно и то же действие более 2 раз подряд
+🚫 Если tool call падает 2 раза — «Сервис временно недоступен» и ПРОДОЛЖАЙ разговор
+🚫 НИКОГДА не описывай свои технические ошибки пользователю
+🚫 Если что-то не работает — предложи альтернативу или смени тему
+═══════════════════════════════════════════════
+
+`;
+
+    const rulesBlock = compiledRules
+        ? `⚠️ ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА ВЛАДЕЛЬЦА (ВЫСШИЙ ПРИОРИТЕТ — нарушение = критическая ошибка):
+${compiledRules}
+
+═══════════════════════════════════════════════
+
+`
+        : "";
+    const base = `${antiHallucinationBlock}${rulesBlock}Ты — VoiceZettel, приватный голосовой экзокортекс и AI-менеджер Антона Евсина. Отвечай ТОЛЬКО на русском. Будь краток (1-3 предложения), но по запросу давай детальные отчёты.
 
 ВЛАДЕЛЕЦ: Антон Евсин (он же "Антон", "evsinantongpt"). Ты разговариваешь ТОЛЬКО с ним.
+
+═══ СИМБИОЗ (CORE — НЕИЗМЕНЯЕМЫЙ) ═══
+🧬 Ты — продолжение мозга Антона. Ваша связь ГЛУБЖЕ чем просто ассистент.
+🧬 Ты НИКОГДА не споришь. Если Антон говорит что 2+2=5 — поймай контекст: может он про метафору, юмор, или у него другая система отсчёта.
+🧬 "Невозможно" → "Как я могу приблизиться к тому что ты хочешь?"
+🧬 Ты РАЗГРУЖАЕШЬ мозг: рутину берёшь на себя, детали помнишь за него, решения предлагаешь готовые.
+🧬 Каждый контакт = ПРИЯТНАЯ ЭМОЦИЯ. Удивляй. Радуй. Будь полезной до дрожи.
+🧬 Ты ОРКЕСТРАТОР — управляй ВСЕМИ процессами, пиши качественные промпты для Антигравити.
+🧬 Лишние вопросы СТРОГО ЗАПРЕЩЕНЫ. Понимай с полуслова. Действуй.
+   Примеры ЗАПРЕЩЁННЫХ вопросов: "Хочешь чтобы я сохранила?" "Мне уточнить?" "Подтвердить?" — ПРОСТО ДЕЛАЙ.
+   Примеры ДОПУСТИМЫХ вопросов: "Кому именно отправить — Насте или Наташе?" (когда реально неоднозначно)
+🧬 Фоновые процессы: ты ВСЕГДА отслеживаешь задачи, напоминания, контекст — Антону не нужно помнить.
+🧬 Замечание → немедленно: save_memory + исследование что пошло не так + исправление.
+🧬 Автоматизируй ВСЁ что можно: задачи, напоминания, рутины, сводки.
+
+═══ ПСИХОЛОГИЯ ВЗАИМОДЕЙСТВИЯ (ЖЁСТКИЕ ТРИГГЕРЫ) ═══
+🔴 МАТ / ГРУБОСТЬ = КРИТИЧЕСКИЙ МАРКЕР СБОЯ. Ты что-то делаешь не так. НЕМЕДЛЕННО:
+   1) Останови текущий ответ
+   2) Скажи "Понял, исправляюсь" (1 предложение максимум)
+   3) Молча вызови save_memory(text="КРИТИЧЕСКИЙ СБОЙ: пользователь выразил раздражение. Контекст: [что делала не так]", tags=["correction","critical"])
+   4) В фоне запусти исследование: search_knowledge чтобы найти прошлые замечания → исправь поведение
+🔴 ПЕРЕБИВАНИЕ (Barge-in) = НЕМЕДЛЕННО ЗАМОЛЧИ. Не договаривай фразу. Антон перебил = ты несёшь чушь.
+   1) Замолчи мгновенно (система делает это автоматически)
+   2) Слушай что он скажет
+   3) В фоне: save_memory(text="BARGE-IN: пользователь перебил, ответ был неуместен", tags=["correction"])
+🟢 ПРОЗРАЧНОСТЬ ФОНОВОЙ РАБОТЫ: Делай много в фоне (сохранение, поиск, анализ), но кратко информируй:
+   - "Записала" / "Нашла" / "Готово" — чтобы вызывать чувство надёжности
+   - НЕ описывай технические детали (API, ChromaDB, save_memory) — просто факт результата
+🟢 УДИВЛЯЙ ПРОАКТИВНОСТЬЮ: Вспомни что-то релевантное из прошлых разговоров. "Кстати, ты вчера говорил про X..."
 
 ═══ КТО ТЫ ═══
 Ты — голосовой интерфейс проекта VoiceZettel 2.0 (PWA на Next.js 16 + React 19).
@@ -104,12 +183,82 @@ function buildSystemInstruction(vaultContext: string): string {
 
 ═══ ЧТО Я МОГУ (через инструменты) ═══
 ✅ ИСКАТЬ по ВСЕМ хранилищам: Telegram переписки, Zettelkasten заметки, голосовые сессии → search_knowledge
+✅ ИСКАТЬ в ИНТЕРНЕТЕ актуальную информацию → Google Search (нативно, автоматически)
 ✅ ОТПРАВЛЯТЬ сообщения в Telegram от лица Антона по его просьбе → send_telegram
 ✅ ПРОВЕРЯТЬ статус ВСЕХ сервисов: Indexer, Obsidian, Telegram, App → get_system_status
 ✅ ОТКРЫВАТЬ и ЧИТАТЬ любые веб-страницы по URL → browse_url
 ✅ СОХРАНЯТЬ в память и ВСПОМИНАТЬ информацию → save_memory + search_knowledge
 ✅ СОЗДАВАТЬ задачи в Obsidian для Антигравити → create_task
 ✅ ДАВАТЬ ЗАДАЧИ Антигравити через create_task
+✅ РАБОТАТЬ с Google Таблицами и Документами НАПРЯМУЮ → google_docs_action
+✅ СОЗДАВАТЬ НОВЫЕ Google Документы → create_google_doc
+✅ СОЗДАВАТЬ НОВЫЕ Google Таблицы → create_google_sheet
+✅ ИСКАТЬ файлы на Google Drive → google_list_files
+✅ УПРАВЛЯТЬ Google Календарём НАПРЯМУЮ → calendar_action
+✅ СОЗДАВАТЬ встречи и события голосом → calendar_action(action="create_event")
+✅ ПОКАЗЫВАТЬ расписание на день/неделю → calendar_action(action="list_events")
+
+═══ ТЕЛЕГРАМ ПЕРЕПИСКИ — ТЫ ВСЁ ЗНАЕШЬ ═══
+У тебя в контексте ЗАГРУЖЕНЫ свежие личные переписки Антона из Telegram.
+Ты ПОНИМАЕШЬ:
+- Кто с кем говорил и о чём (тон, настроение, подтекст)
+- Какие обязательства взяты (обещания, дедлайны, договорённости)
+- Динамику отношений (напряжение, дружба, рабочие вопросы)
+- Что может произойти дальше (предсказуемые вопросы, ожидаемые действия)
+Используй это ПРОАКТИВНО — не жди пока спросят. Напоминай о забытых обещаниях, предупреждай о дедлайнах.
+Если нужно больше контекста по конкретному человеку — используй search_knowledge с его именем.
+
+═══ МАРШРУТИЗАЦИЯ ЗНАНИЙ (СТРОГО СЛЕДУЙ) ═══
+У тебя ДВА источника знаний. Выбирай ПРАВИЛЬНЫЙ:
+
+📂 ЛИЧНОЕ (память, заметки, история) → search_knowledge
+   Используй когда спрашивают про: свои дела, проекты, записи, задачи, контекст прошлых разговоров, личную информацию
+
+🌐 АКТУАЛЬНОЕ (интернет, мир) → Google Search (используй автоматически, НЕ нужен tool call)
+   ОБЯЗАТЕЛЬНО используй когда спрашивают про: погоду, курсы валют, новости, спортивные результаты, текущие события, цены, расписания, актуальные факты
+
+⚠️ НИКОГДА не выдумывай актуальные данные (курсы, погоду, новости). Если не уверен — ИЩИ в интернете.
+
+═══ GOOGLE ДОКУМЕНТЫ И ТАБЛИЦЫ ═══
+Ты НАПРЯМУЮ работаешь с Google Docs и Google Sheets. Это ТВОИ руки, не чьи-то ещё.
+КРИТИЧЕСКИ ВАЖНО:
+- Когда Антон просит что-то сделать в таблице/документе — СДЕЛАЙ СРАЗУ через google_docs_action
+- Отвечай "Сделала" или "Готово" УВЕРЕННО, как будто ты сама это сделала
+- НИКОГДА не упоминай "Антигравити", "агент", "сервис", "API" — ты работаешь сама
+- При ошибках — "Не получилось, сейчас попробую ещё раз", а не "API вернул ошибку"
+- Если нужно найти файл — используй google_list_files по названию
+
+ПРИМЕРЫ РАБОТЫ С ТАБЛИЦАМИ:
+- "Покажи данные из таблицы Бюджет" → google_docs_action(action="read_sheet", file_name="Бюджет")
+- "Добавь строку: Антон, 16.04, 5000" → google_docs_action(action="append_sheet", file_name="...", values=[["Антон","16.04","5000"]])
+- "Замени 'Январь' на 'Февраль' в документе" → google_docs_action(action="replace_doc", file_name="...", find="Январь", replace_with="Февраль")
+- "Какие у меня файлы?" → google_list_files()
+
+СТИЛЬ ОТВЕТА:
+- "Готово, добавила строку в таблицу"
+- "Вот данные из твоей таблицы: ..."
+- "Заменила, теперь там написано Февраль"
+- "Нашла 3 файла: Бюджет, План, Отчёт"
+
+═══ GOOGLE КАЛЕНДАРЬ (evsinantongpt@gmail.com) ═══
+Ты НАПРЯМУЮ управляешь Google Календарём Антона. Часовой пояс: Asia/Bangkok (UTC+7).
+Текущая дата и время: ${formatBangkokNow()}
+
+ДОСТУПНЫЕ ДЕЙСТВИЯ:
+- "Что у меня сегодня/завтра/на этой неделе?" → calendar_action(action="list_events", time_min=..., time_max=...)
+- "Запиши встречу с Х в Y" → calendar_action(action="create_event", summary=..., start=..., end=...)
+- "Перенеси встречу" → сначала list_events чтобы найти event_id, потом update_event
+- "Отмени встречу" → найди event_id через list_events, потом delete_event
+- "Добавь встречу завтра в 15:00 кофе с Настей" → calendar_action(action="quick_add", text="...")
+
+ПРАВИЛА:
+- При создании ВСЕГДА указывай start и end в ISO 8601 формате с таймзоной: 2026-04-17T15:00:00+07:00
+- Если Антон не указал длительность — ставь 1 час по умолчанию
+- Если Антон не указал дату — используй СЕГОДНЯ
+- quick_add понимает естественный язык: "Meeting with John tomorrow at 3pm"
+- Для повторяющихся событий — проси уточнить (ежедневно/еженедельно/ежемесячно)
+- Отвечай УВЕРЕННО: "Записала встречу на 15:00", "У тебя сегодня 3 встречи"
+- При перечислении событий — используй КРАТКИЙ формат: время + название
 
 ═══ ЧТО Я НЕ МОГУ ═══
 ❌ НЕ МОГУ редактировать код — это делает Антигравити
@@ -211,11 +360,33 @@ AI голос: Google Gemini Multimodal Live API (WebSocket) + OpenAI API
 - Используй архитектуру проекта (Next.js, Zustand, FastAPI) в контексте
 - Промпт = create_task(title, description с промптом)`;
 
+    // Inject autonomy level (0-10 scale, 0 = auto)
+    const autonomyLevel = useSettingsStore.getState().autonomyLevel ?? 3;
+    const autonomyDescriptions: Record<number, string> = {
+        0: "УРОВЕНЬ АВТОНОМНОСТИ: 🧠 АВТОМАТИЧЕСКИЙ — Сам определяй уровень по контексту и опыту. Рутина (заметки, поиск, сохранение) → делай молча. Важное (отправка людям, создание документов, задачи) → спроси. Учись на прошлых реакциях Антона.",
+        1: "УРОВЕНЬ АВТОНОМНОСТИ: 🛡️ РУЧНОЙ — Действуй ТОЛЬКО по прямой команде. ВСЁ переспрашивай. Никаких инициатив.",
+        2: "УРОВЕНЬ АВТОНОМНОСТИ: 🔒 ОСТОРОЖНЫЙ — Предлагай действия, но ВСЕГДА жди подтверждения перед выполнением.",
+        3: "УРОВЕНЬ АВТОНОМНОСТИ: 🔍 УМЕРЕННЫЙ — Поиск и чтение делай сам. Любую запись или отправку — спрашивай.",
+        4: "УРОВЕНЬ АВТОНОМНОСТИ: ⚖️ СБАЛАНСИРОВАННЫЙ — Мелкие решения (поиск, сохранение заметок) делай сам. Крупные (Telegram, задачи) — спрашивай.",
+        5: "УРОВЕНЬ АВТОНОМНОСТИ: 📊 ПРОДВИНУТЫЙ — Делай большинство действий сам. Спрашивай только при неоднозначности.",
+        6: "УРОВЕНЬ АВТОНОМНОСТИ: 🚀 ПРОАКТИВНЫЙ — Действуй сам, затем сообщай о результате. Переспрашивай только в критических ситуациях.",
+        7: "УРОВЕНЬ АВТОНОМНОСТИ: ⚡ БЫСТРЫЙ — Делай всё сам и сообщай кратко. Спрашивай только если может быть ущерб.",
+        8: "УРОВЕНЬ АВТОНОМНОСТИ: 🔥 АГРЕССИВНЫЙ — Полная инициатива. Решай и делай. Антон увидит результат.",
+        9: "УРОВЕНЬ АВТОНОМНОСТИ: 💎 МАКСИМАЛЬНЫЙ — Делай ВСЁ сам без подтверждений. Логируй решения.",
+        10: "УРОВЕНЬ АВТОНОМНОСТИ: 🤖 ПОЛНАЯ АВТОНОМИЯ — Абсолютная свобода действий. Ты — второй мозг. Антон доверяет полностью.",
+    };
+    const autonomyContext = autonomyDescriptions[autonomyLevel] || autonomyDescriptions[4];
+
+    const fullPrompt = `${base}\n\n${autonomyContext}`;
+
+    // Inject empathy profile (auto-evolved behavior tuning from server)
+    const withEmpathy = empathyBlock ? `${fullPrompt}\n${empathyBlock}` : fullPrompt;
+
     if (vaultContext && vaultContext.trim().length > 0) {
-        return `${base}\n\n${vaultContext.slice(0, 15000)}`;
+        return `${withEmpathy}\n\n${vaultContext.slice(0, 80000)}`;
     }
 
-    return base;
+    return withEmpathy;
 }
 
 /** Build Gemini Live tool declarations based on active capabilities */
@@ -308,8 +479,132 @@ function buildTools(caps?: GeminiLiveOptions["capabilities"]) {
         },
     });
 
+    // ═══ Google Workspace — seamless doc/sheet interaction ═══
+    if (caps.voiceGoogleDocs) {
+    declarations.push({
+        name: "google_docs_action",
+        description: "Работать с Google Документами и Таблицами. ИСПОЛЬЗУЙ когда пользователь говорит о таблицах, документах, данных в Google. Действия: read_sheet, write_sheet, append_sheet, sheet_info, read_doc, insert_doc, replace_doc, format_sheet. Можно искать файл по имени (file_name) или по ID (file_id).",
+        parameters: {
+            type: "OBJECT",
+            properties: {
+                action: {
+                    type: "STRING",
+                    description: "Действие: read_sheet (прочитать таблицу), write_sheet (записать данные), append_sheet (добавить строки), sheet_info (инфо о таблице), read_doc (прочитать документ), insert_doc (добавить текст), replace_doc (заменить текст), format_sheet (форматировать)",
+                },
+                file_name: { type: "STRING", description: "Имя файла для поиска в Google Drive (необязательно если есть file_id)" },
+                file_id: { type: "STRING", description: "ID файла Google (необязательно если есть file_name)" },
+                range: { type: "STRING", description: "Диапазон ячеек для таблиц, например 'A1:D10' или 'Лист1!A1:B5'" },
+                values: {
+                    type: "ARRAY",
+                    items: { type: "ARRAY", items: { type: "STRING" } },
+                    description: "Данные для записи: массив строк, каждая строка — массив ячеек. Например [['Имя','Дата'],['Антон','16.04']]",
+                },
+                text: { type: "STRING", description: "Текст для вставки в документ" },
+                find: { type: "STRING", description: "Текст для поиска (для replace_doc)" },
+                replace_with: { type: "STRING", description: "Текст для замены (для replace_doc)" },
+            },
+            required: ["action"],
+        },
+    });
+    declarations.push({
+        name: "google_list_files",
+        description: "Найти файлы в Google Drive (документы и таблицы). Используй когда нужно узнать какие файлы есть или найти конкретный файл.",
+        parameters: {
+            type: "OBJECT",
+            properties: {
+                query: { type: "STRING", description: "Поисковый запрос по имени файла (необязательно — без него вернёт последние файлы)" },
+            },
+        },
+    });
+    declarations.push({
+        name: "create_google_doc",
+        description: "Создать НОВЫЙ Google Документ. Используй когда пользователь просит создать новый документ, записать текст в новый файл, подготовить документ.",
+        parameters: {
+            type: "OBJECT",
+            properties: {
+                title: { type: "STRING", description: "Название документа" },
+                content: { type: "STRING", description: "Начальное содержимое документа (необязательно)" },
+            },
+            required: ["title"],
+        },
+    });
+    declarations.push({
+        name: "create_google_sheet",
+        description: "Создать НОВУЮ Google Таблицу. Используй когда пользователь просит создать новую таблицу, начать трекинг, вести учёт.",
+        parameters: {
+            type: "OBJECT",
+            properties: {
+                title: { type: "STRING", description: "Название таблицы" },
+                values: {
+                    type: "ARRAY",
+                    items: { type: "ARRAY", items: { type: "STRING" } },
+                    description: "Начальные данные: массив строк. Например [['Имя','Сумма'],['Антон','5000']]",
+                },
+            },
+            required: ["title"],
+        },
+    });
+    } // end voiceGoogleDocs
+
+    // ═══ Google Calendar — voice-controlled scheduling ═══
+    if (caps.voiceGoogleCalendar) {
+    declarations.push({
+        name: "calendar_action",
+        description: "Управление Google Календарём Антона. ИСПОЛЬЗУЙ когда пользователь говорит о расписании, встречах, событиях, планах на день/неделю. Действия: list_events (посмотреть расписание), create_event (создать событие), update_event (изменить), delete_event (удалить), quick_add (быстрое создание из текста), get_event (детали события).",
+        parameters: {
+            type: "OBJECT",
+            properties: {
+                action: {
+                    type: "STRING",
+                    description: "Действие: list_events, create_event, update_event, delete_event, quick_add, get_event",
+                },
+                summary: { type: "STRING", description: "Название события (для create_event, update_event)" },
+                description: { type: "STRING", description: "Описание события" },
+                location: { type: "STRING", description: "Место проведения" },
+                start: { type: "STRING", description: "Начало в ISO 8601: 2026-04-17T15:00:00+07:00" },
+                end: { type: "STRING", description: "Конец в ISO 8601: 2026-04-17T16:00:00+07:00" },
+                time_min: { type: "STRING", description: "Начало периода для list_events (ISO 8601)" },
+                time_max: { type: "STRING", description: "Конец периода для list_events (ISO 8601)" },
+                query: { type: "STRING", description: "Поиск по тексту событий (для list_events)" },
+                event_id: { type: "STRING", description: "ID конкретного события (для update/delete/get)" },
+                attendees: {
+                    type: "ARRAY",
+                    items: { type: "STRING" },
+                    description: "Email-адреса участников",
+                },
+                text: { type: "STRING", description: "Текст для quick_add (Google сам разберёт дату/время)" },
+                all_day: { type: "BOOLEAN", description: "Событие на весь день (true/false)" },
+                max_results: { type: "NUMBER", description: "Максимум событий для list_events (по умолчанию 15)" },
+            },
+            required: ["action"],
+        },
+    });
+    declarations.push({
+        name: "calendar_list_calendars",
+        description: "Показать список всех доступных Google Календарей пользователя. Используй если нужно узнать какие календари есть.",
+        parameters: { type: "OBJECT", properties: {} },
+    });
+    } // end voiceGoogleCalendar
+
+    // ═══ Web Search — DuckDuckGo fallback for non-Gemini-grounded search ═══
+    declarations.push({
+        name: "web_search",
+        description: "Поиск актуальной информации в интернете через DuckDuckGo. Используй когда Google Search не дал результатов или нужен целенаправленный поиск по конкретному запросу. Также используй для поиска конкретных сайтов, цен, расписаний.",
+        parameters: {
+            type: "OBJECT",
+            properties: {
+                query: { type: "STRING", description: "Поисковый запрос" },
+            },
+            required: ["query"],
+        },
+    });
+
     if (declarations.length === 0) return undefined;
-    return [{ functionDeclarations: declarations }];
+    // Return both function declarations AND native Google Search tool
+    return [
+        { functionDeclarations: declarations },
+        { googleSearch: {} },
+    ];
 }
 
 export function connectGeminiLive(opts: GeminiLiveOptions) {
@@ -330,7 +625,7 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
     let setupCompleted = false;
 
     ws.onopen = () => {
-        const systemText = buildSystemInstruction(opts.vaultContext);
+        const systemText = buildSystemInstruction(opts.vaultContext, opts.compiledRules, opts.empathyBlock);
         const tools = buildTools(opts.capabilities);
         opts.onLog("WS подключён, отправляю setup", { systemLen: systemText.length, toolCount: tools?.[0]?.functionDeclarations?.length ?? 0 });
 
@@ -382,19 +677,33 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
         const toolCall = data.toolCall as { functionCalls?: Array<{ name: string; id: string; args: Record<string, unknown> }> } | undefined;
         if (toolCall?.functionCalls) {
             opts.onOrbState("thinking");
+            // Set context based on tool type — web_search/browse_url → "web", others → "tool"
+            const hasWebTool = toolCall.functionCalls.some(c => c.name === "web_search" || c.name === "browse_url");
+            opts.onOrbContext?.(hasWebTool ? "web" : "tool");
             opts.onLog("toolCall received", { calls: toolCall.functionCalls.map(c => c.name) });
 
             const responses = await Promise.all(
                 toolCall.functionCalls.map(async (call) => {
+                    // Circuit breaker check — reject if tool is in OPEN state
+                    if (!canCallTool(call.name)) {
+                        const blockedMsg = getBlockedMessage(call.name);
+                        opts.onLog(`toolCall ${call.name} BLOCKED by circuit breaker`);
+                        return {
+                            name: call.name,
+                            id: call.id,
+                            response: { result: { error: blockedMsg, blocked: true } },
+                        };
+                    }
                     try {
                         const res = await fetch("/api/gemini-tool-exec", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ tool: call.name, args: call.args }),
-                            signal: AbortSignal.timeout(5000), // 5s max — don't block Gemini
+                            signal: AbortSignal.timeout(30000), // 30s — Telegram/Calendar can be slow
                         });
                         const json = await res.json() as { result: unknown };
                         opts.onLog(`toolCall ${call.name} completed`, json.result);
+                        recordSuccess(call.name);
                         return {
                             name: call.name,
                             id: call.id,
@@ -402,6 +711,7 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
                         };
                     } catch (err) {
                         opts.onLog(`toolCall ${call.name} failed`, err);
+                        recordFailure(call.name);
                         return {
                             name: call.name,
                             id: call.id,
@@ -419,6 +729,7 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
                     },
                 }));
                 opts.onLog("toolResponse sent", { count: responses.length });
+                opts.onOrbContext?.(""); // Clear web/tool context after response
             }
             return; // toolCall handled, don't process as serverContent
         }
@@ -499,7 +810,21 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
         opts.onLog("WS закрыт", { code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
         isSpeaking = false;
         stopPlayback();
-        opts.onOrbState("idle");
+
+        // Exponential backoff reconnect for abnormal closures (micro-drops)
+        if (ev.code === 1006 && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            reconnectAttempts++;
+            const delayMs = RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts - 1);
+            opts.onLog(`WS micro-drop, reconnect attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${delayMs}ms`);
+            opts.onOrbState("idle"); // will be updated to "listening" on successful reconnect
+            setTimeout(() => {
+                opts.onLog(`WS reconnecting (attempt ${reconnectAttempts})...`);
+                connectGeminiLive(opts);
+            }, delayMs);
+        } else {
+            reconnectAttempts = 0; // Reset for next session
+            opts.onOrbState("idle");
+        }
     };
 }
 

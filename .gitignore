@@ -2,6 +2,11 @@
 
 # Obsidian Vault (personal data — NEVER commit)
 /VoiceZettel/
+/services/VoiceZettel/
+
+# Debug/test data artifacts
+data/last_setup.json
+data/test_*
 
 # dependencies
 /node_modules

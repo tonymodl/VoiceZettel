@@ -28,6 +28,7 @@ const SWIPE_THRESHOLD = 80;
 
 export function OrbArea() {
     const orbState = useChatStore((s) => s.orbState);
+    const orbContext = useChatStore((s) => s.orbContext);
     const audioLevel = useChatStore((s) => s.audioLevel);
     const setOrbMode = useChatStore((s) => s.setOrbMode);
     const orbParticles = useSettingsStore((s) => s.orbParticles);
@@ -124,6 +125,7 @@ export function OrbArea() {
                             >
                                 <ParticleOrb
                                     state={orbState}
+                                    context={orbContext}
                                     audioLevel={audioLevel}
                                     particleCount={orbParticles}
                                     onClick={handleOrbClick}
@@ -150,8 +152,8 @@ export function OrbArea() {
                                     )}
                                 </AnimatePresence>
 
-                                <span className="-mt-5 text-xs tracking-wide text-zinc-500" aria-live="polite">
-                                    {STATE_LABELS[orbState]}
+                                <span className={`-mt-5 text-xs tracking-wide ${orbState === "thinking" && orbContext === "web" ? "text-cyan-400" : "text-zinc-500"}`} aria-live="polite">
+                                    {orbState === "thinking" && orbContext === "web" ? "Ищу в сети…" : STATE_LABELS[orbState]}
                                 </span>
                             </div>
                         </motion.div>

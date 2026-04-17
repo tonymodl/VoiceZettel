@@ -140,7 +140,12 @@ class LiveSync:
 
     async def _vectorize_file(self, file_path: str, msg_entry: dict) -> bool:
         """Send a written file to the indexer for vectorization.
-        Updates the message entry's vectorization_status in-place."""
+        Updates the message entry's vectorization_status in-place.
+        
+        IMPORTANT: Checks response body for {"status": "ok"}, not just HTTP 200.
+        The indexer returns 200 with {"status": "skipped"} for files < 20 chars,
+        which previously caused the dashboard to falsely show "vectorized".
+        """
         msg_entry["vectorization_status"] = "vectorizing"
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -149,9 +154,20 @@ class LiveSync:
                     json={"file_path": file_path},
                 )
                 if r.status_code == 200:
-                    msg_entry["vectorization_status"] = "vectorized"
-                    self._stats["messages_vectorized"] += 1
-                    return True
+                    body = r.json()
+                    actual_status = body.get("status", "unknown")
+                    if actual_status == "ok":
+                        chunks = body.get("chunks", 0)
+                        msg_entry["vectorization_status"] = "vectorized"
+                        self._stats["messages_vectorized"] += 1
+                        logger.debug(f"Vectorized {file_path}: {chunks} chunks")
+                        return True
+                    else:
+                        # Indexer returned 200 but skipped the file (too short, etc.)
+                        reason = body.get("reason", "unknown")
+                        msg_entry["vectorization_status"] = f"skipped: {reason}"
+                        logger.info(f"Indexer skipped {file_path}: {reason}")
+                        return False
                 else:
                     logger.warning(f"Indexer returned {r.status_code} for {file_path}")
                     msg_entry["vectorization_status"] = "error"

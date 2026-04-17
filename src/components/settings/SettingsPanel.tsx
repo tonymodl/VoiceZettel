@@ -7,6 +7,7 @@ import {
     ChevronRight,
     LayoutGrid,
     Sparkles,
+    Brain,
     Bot,
     MessageSquareText,
     ShieldCheck,
@@ -25,8 +26,10 @@ import { AgentsSection } from "./AgentsSection";
 import { PromptsSection } from "./PromptsSection";
 import { ObsidianSection } from "./ObsidianSection";
 import { LiteLLMSection } from "./LiteLLMSection";
+import { ContextWindowSection } from "./ContextWindowSection";
 import { LogsSection } from "./LogsSection";
 import { NotesSection } from "./NotesSection";
+import { DocsSection } from "./DocsSection";
 import { VoiceTaskSidebar } from "@/components/tasks/VoiceTaskSidebar";
 import { useNotesStore } from "@/stores/notesStore";
 import type { SettingsSectionId, SettingsMenuItem } from "./types";
@@ -34,8 +37,10 @@ import type { SettingsSectionId, SettingsMenuItem } from "./types";
 const MENU_ITEMS: SettingsMenuItem[] = [
     { id: "notes", label: "Мои заметки", icon: FileText },
     { id: "tasks", label: "Задачи", icon: ListChecks },
+    { id: "docs", label: "Google Документы", icon: FileText },
     { id: "widgets", label: "Виджеты", icon: LayoutGrid },
     { id: "ai", label: "Настройки ИИ", icon: Sparkles },
+    { id: "context", label: "Контекст", icon: Brain },
     { id: "agents", label: "Агенты", icon: Bot },
     { id: "prompts", label: "Промты", icon: MessageSquareText },
     { id: "logs", label: "Логи", icon: ScrollText },
@@ -45,8 +50,10 @@ const MENU_ITEMS: SettingsMenuItem[] = [
 const SECTION_TITLES: Record<SettingsSectionId, string> = {
     notes: "Мои заметки",
     tasks: "Задачи",
+    docs: "Google Документы",
     widgets: "Виджеты",
     ai: "Настройки ИИ",
+    context: "Контекстное окно",
     agents: "Агенты",
     prompts: "Промты",
     logs: "Логи",
@@ -100,10 +107,14 @@ function SectionContent({ id }: { id: SettingsSectionId }) {
                     <LiteLLMSection />
                 </>
             );
+        case "context":
+            return <ContextWindowSection />;
         case "agents":
             return <AgentsSection />;
         case "prompts":
             return <PromptsSection />;
+        case "docs":
+            return <DocsSection />;
         case "logs":
             return <LogsSection />;
         case "admin":

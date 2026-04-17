@@ -94,6 +94,20 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                 voiceSystemStatus: true,
                 voiceUrlAccess: true,
                 voiceTaskManagement: true,
+                voiceGoogleDocs: true,
+                voiceGoogleCalendar: true,
+                // Antigravity Agent Settings
+                voiceNotifications: true,
+                autonomyLevel: 4,
+                // Context Window Priority Sliders (percentages, must sum to 100)
+                contextPriorities: {
+                    critical: 28,
+                    active: 14,
+                    predicted: 16,
+                    recent: 14,
+                    vault: 15,
+                    tools: 13,
+                },
 
                 toggleShowUsdTokens: () =>
                     set((s) => ({ showUsdTokens: !s.showUsdTokens })),
@@ -170,6 +184,11 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                 toggleVoiceSystemStatus: () => set((s) => ({ voiceSystemStatus: !s.voiceSystemStatus })),
                 toggleVoiceUrlAccess: () => set((s) => ({ voiceUrlAccess: !s.voiceUrlAccess })),
                 toggleVoiceTaskManagement: () => set((s) => ({ voiceTaskManagement: !s.voiceTaskManagement })),
+                toggleVoiceGoogleDocs: () => set((s) => ({ voiceGoogleDocs: !s.voiceGoogleDocs })),
+                toggleVoiceGoogleCalendar: () => set((s) => ({ voiceGoogleCalendar: !s.voiceGoogleCalendar })),
+                toggleVoiceNotifications: () => set((s) => ({ voiceNotifications: !s.voiceNotifications })),
+                setAutonomyLevel: (level) => set({ autonomyLevel: level }),
+                setContextPriorities: (priorities) => set({ contextPriorities: priorities }),
             }),
             {
                 name: "voicezettel-settings",
@@ -208,8 +227,13 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                     voiceSystemStatus: state.voiceSystemStatus,
                     voiceUrlAccess: state.voiceUrlAccess,
                     voiceTaskManagement: state.voiceTaskManagement,
+                    voiceGoogleDocs: state.voiceGoogleDocs,
+                    voiceGoogleCalendar: state.voiceGoogleCalendar,
+                    voiceNotifications: state.voiceNotifications,
+                    autonomyLevel: state.autonomyLevel,
+                    contextPriorities: state.contextPriorities,
                 }),
-                version: 19,
+                version: 23,
                 migrate: (persisted, version) => {
                     const state = persisted as Record<string, unknown>;
                     if (version < 2) {
@@ -291,6 +315,18 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                         state.voiceSystemStatus = state.voiceSystemStatus ?? true;
                         state.voiceUrlAccess = state.voiceUrlAccess ?? true;
                         state.voiceTaskManagement = state.voiceTaskManagement ?? true;
+                    }
+                    if (version < 21) {
+                        state.voiceGoogleDocs = state.voiceGoogleDocs ?? true;
+                    }
+                    if (version < 22) {
+                        state.contextPriorities = state.contextPriorities ?? {
+                            critical: 28, active: 14, predicted: 16,
+                            recent: 14, vault: 15, tools: 13,
+                        };
+                    }
+                    if (version < 23) {
+                        state.voiceGoogleCalendar = state.voiceGoogleCalendar ?? true;
                     }
                     return state;
                 },

@@ -19,7 +19,7 @@ interface Props {
 export function MainLayout({ topBar }: Props) {
     return (
         <div className="flex h-dvh flex-col bg-zinc-950">
-            <div className="mx-auto flex w-full max-w-[480px] flex-1 flex-col min-h-0 px-4">
+            <div className="mx-auto flex w-full max-w-[480px] flex-1 flex-col min-h-0 overflow-x-hidden px-4">
                 {topBar}
 
                 <ErrorBoundary label="Счётчики">

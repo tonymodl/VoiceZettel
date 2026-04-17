@@ -19,6 +19,9 @@ const DashboardTab = lazy(() =>
 const TelegramTab = lazy(() =>
     import("@/components/admin/TelegramTab").then((m) => ({ default: m.TelegramTab }))
 );
+const DunbarTab = lazy(() =>
+    import("@/components/admin/DunbarTab").then((m) => ({ default: m.DunbarTab }))
+);
 
 function LoadingSkeleton() {
     return (
@@ -38,6 +41,7 @@ const TAB_TITLES: Record<string, string> = {
     logs: "📋 Логи",
     prompts: "🧠 Промпты",
     telegram: "📨 Telegram",
+    dunbar: "👥 Круги Данбара",
     users: "👥 Пользователи",
     "mission-control": "🛰️ Mission Control",
     workspace: "📄 Документы",
@@ -86,7 +90,7 @@ export default function AdminPage() {
                 </header>
 
                 {/* Tab content */}
-                <main className="flex-1 overflow-y-auto p-3 sm:p-4">
+                <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4">
                     {activeTab === "dashboard" && (
                         <Suspense fallback={<LoadingSkeleton />}>
                             <DashboardTab />
@@ -100,6 +104,11 @@ export default function AdminPage() {
                         </Suspense>
                     )}
                     {activeTab === "users" && <UsersTab />}
+                    {activeTab === "dunbar" && (
+                        <Suspense fallback={<LoadingSkeleton />}>
+                            <DunbarTab />
+                        </Suspense>
+                    )}
                     {activeTab === "mission-control" && <MissionControlTab />}
                     {activeTab === "workspace" && <WorkspaceTab />}
                 </main>

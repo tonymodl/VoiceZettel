@@ -6,6 +6,7 @@ export const AdminTabSchema = z.enum([
     "logs",
     "prompts",
     "telegram",
+    "dunbar",
     "users",
     "mission-control",
     "workspace",

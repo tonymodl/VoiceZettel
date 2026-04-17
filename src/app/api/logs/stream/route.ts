@@ -78,7 +78,7 @@ export async function GET() {
           );
         } catch {
           clearInterval(interval);
-          controller.close();
+          try { controller.close(); } catch { /* already closed */ }
         }
       }, 2000);
 

@@ -1,7 +1,8 @@
+require("dotenv").config();
 const { WebSocketServer, WebSocket } = require("ws");
 
 const GOOGLE_GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY;
-const GEMINI_LIVE_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-2.0-flash-live-001";
+const GEMINI_LIVE_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-2.5-flash-native-audio-latest";
 const PORT = process.env.GEMINI_PROXY_PORT || 3099;
 
 const GEMINI_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GOOGLE_GEMINI_API_KEY}`;
@@ -54,12 +55,35 @@ wss.on("connection", (clientWs) => {
         const sysText = parsed.setup.system_instruction.parts?.[0]?.text ?? "";
         console.log("[Proxy] SETUP system_instruction length:", sysText.length);
         console.log("[Proxy] SETUP first 500 chars:", sysText.slice(0, 500));
-        // Check if "Красотка" is in the instruction
-        if (sysText.includes("Красотка")) {
-          console.log("[Proxy] ✅ 'Красотка' FOUND in system instruction!");
+        // Check key context presence
+        const checks = {
+          "Красотка": sysText.includes("Красотка"),
+          "Настя": sysText.includes("Настя"),
+          "Константин": sysText.includes("Константин"),
+          "search_knowledge": sysText.includes("search_knowledge"),
+          "send_telegram": sysText.includes("send_telegram"),
+          "calendar_action": sysText.includes("calendar_action"),
+          "save_memory": sysText.includes("save_memory"),
+        };
+        console.log("[Proxy] Context checks:", JSON.stringify(checks));
+        // Log tool count
+        const tools = parsed.setup.tools;
+        if (tools) {
+          const funcCount = tools[0]?.functionDeclarations?.length ?? 0;
+          const googleSearch = tools[0]?.googleSearch ? "YES" : "NO";
+          console.log(`[Proxy] Tools: ${funcCount} functions, googleSearch=${googleSearch}`);
         } else {
-          console.log("[Proxy] ❌ 'Красотка' NOT in system instruction");
+          console.log("[Proxy] ⚠️ NO TOOLS in setup message!");
         }
+        // Write to file for later analysis
+        const fs = require("fs");
+        fs.writeFileSync("data/last_setup.json", JSON.stringify({
+          timestamp: new Date().toISOString(),
+          systemInstructionLength: sysText.length,
+          checks,
+          toolCount: tools ? (tools[0]?.functionDeclarations?.length ?? 0) : 0,
+          first1000: sysText.slice(0, 1000),
+        }, null, 2));
       }
     } catch { /* not JSON or no setup */ }
     if (geminiReady && geminiWs.readyState === WebSocket.OPEN) {

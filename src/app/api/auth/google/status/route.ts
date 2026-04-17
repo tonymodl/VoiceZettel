@@ -1,26 +1,48 @@
-import { NextResponse } from "next/server";
-import { isGoogleConnected, getGoogleUserEmail, disconnectGoogle } from "@/lib/googleTokens";
-
 /**
- * GET /api/auth/google/status — Check Google OAuth connection status.
- * DELETE /api/auth/google/status — Disconnect Google account.
+ * @module /api/auth/google/status
+ * Returns Google OAuth status: whether tokens exist, scopes, and if write access is available.
  */
+import { NextResponse } from "next/server";
+import { promises as fs } from "fs";
+import path from "path";
+
+const TOKENS_PATH = path.join(process.cwd(), ".google", "tokens.json");
 
 export async function GET() {
-    const connected = isGoogleConnected();
-    const email = getGoogleUserEmail();
+    try {
+        const raw = await fs.readFile(TOKENS_PATH, "utf-8");
+        const tokens = JSON.parse(raw) as {
+            scope: string;
+            expires_at: number;
+            user_email?: string;
+        };
 
-    return NextResponse.json({
-        connected,
-        email,
-        clientConfigured: !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET,
-    });
-}
+        const scopes = tokens.scope.split(" ");
+        const hasWrite = scopes.some(
+            (s) =>
+                s === "https://www.googleapis.com/auth/spreadsheets" ||
+                s === "https://www.googleapis.com/auth/documents",
+        );
+        const hasCalendar = scopes.some(
+            (s) => s === "https://www.googleapis.com/auth/calendar",
+        );
+        const isExpired = Date.now() > tokens.expires_at;
 
-export async function DELETE() {
-    const success = disconnectGoogle();
-    return NextResponse.json({
-        disconnected: success,
-        connected: false,
-    });
+        return NextResponse.json({
+            connected: true,
+            hasWriteAccess: hasWrite,
+            hasCalendarAccess: hasCalendar,
+            isExpired,
+            email: tokens.user_email || "unknown",
+            scopes,
+        });
+    } catch {
+        return NextResponse.json({
+            connected: false,
+            hasWriteAccess: false,
+            isExpired: true,
+            email: null,
+            scopes: [],
+        });
+    }
 }

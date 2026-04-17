@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { NotificationBell } from "@/components/layout/NotificationBell";
+import { AntigravityProgress } from "@/components/counters/AntigravityProgress";
 import type { SettingsSectionId } from "@/components/settings/types";
 
 interface UserInfo {
@@ -127,6 +128,9 @@ export function TopBar({ user }: { user?: UserInfo | null }) {
             Zettel
           </span>
         </div>
+
+        {/* Antigravity progress indicator */}
+        <AntigravityProgress />
 
         {/* Right side: avatar + bell + notes + burger */}
         <div className="flex items-center gap-2">

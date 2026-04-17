@@ -3,6 +3,10 @@
  * Thin logger wrapper.
  * In production builds, debug and warn are no-ops.
  * Replaces direct console.log usage across the codebase.
+ * 
+ * CRITICAL: remoteLog writes to data/logs/ inside the project,
+ * which triggers Turbopack Fast Refresh → kills WS connections.
+ * In dev mode, only errors are sent remotely.
  */
 
 const isDev = process.env.NODE_ENV !== "production";
@@ -13,11 +17,13 @@ export const logger = {
     },
     info: (...args: unknown[]) => {
         if (isDev) console.info("[VoiceZettel]", ...args);
-        logger.remoteLog("info", String(args[0] ?? ""), args.slice(1));
+        // In dev: skip remoteLog to prevent Fast Refresh loop
+        if (!isDev) logger.remoteLog("info", String(args[0] ?? ""), args.slice(1));
     },
     warn: (...args: unknown[]) => {
         console.warn("[VoiceZettel]", ...args);
-        logger.remoteLog("info", String(args[0] ?? ""), args.slice(1));
+        // In dev: skip remoteLog to prevent Fast Refresh loop
+        if (!isDev) logger.remoteLog("info", String(args[0] ?? ""), args.slice(1));
     },
     error: (...args: unknown[]) => {
         console.error("[VoiceZettel]", ...args);

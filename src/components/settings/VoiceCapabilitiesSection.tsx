@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useNotificationStore } from "@/stores/notificationStore";
 import { Switch } from "@/components/ui/switch";
@@ -74,6 +75,34 @@ export function VoiceCapabilitiesSection() {
             },
             disabled: !settings.voiceTools,
         },
+        {
+            icon: "📄",
+            label: "Google Документы и Таблицы",
+            desc: "Чтение, запись и редактирование файлов Google",
+            enabled: settings.voiceGoogleDocs,
+            toggle: () => {
+                settings.toggleVoiceGoogleDocs();
+                addNotification(
+                    settings.voiceGoogleDocs ? "Google Docs отключён" : "Google Docs включён",
+                    "info",
+                );
+            },
+            disabled: !settings.voiceTools,
+        },
+        {
+            icon: "📅",
+            label: "Google Календарь",
+            desc: "Расписание, встречи, события — голосом",
+            enabled: settings.voiceGoogleCalendar,
+            toggle: () => {
+                settings.toggleVoiceGoogleCalendar();
+                addNotification(
+                    settings.voiceGoogleCalendar ? "Google Календарь отключён" : "Google Календарь включён",
+                    "info",
+                );
+            },
+            disabled: !settings.voiceTools,
+        },
     ];
 
     return (
@@ -139,6 +168,64 @@ export function VoiceCapabilitiesSection() {
                     💡 Изменения вступают в силу при следующем подключении к Gemini Live
                 </p>
             )}
+
+            {settings.voiceTools && (settings.voiceGoogleDocs || settings.voiceGoogleCalendar) && (
+                <GoogleStatusBanner />
+            )}
         </section>
+    );
+}
+
+/** Google Workspace connection status with re-auth button */
+function GoogleStatusBanner() {
+    const [status, setStatus] = useState<{
+        connected: boolean;
+        hasWriteAccess: boolean;
+        hasCalendarAccess: boolean;
+        email: string | null;
+    } | null>(null);
+
+    useEffect(() => {
+        fetch("/api/auth/google/status")
+            .then((r) => r.json())
+            .then((data) => setStatus(data as typeof status))
+            .catch(() => setStatus(null));
+    }, []);
+
+    if (!status) return null;
+
+    const needsReauth = !status.connected || !status.hasWriteAccess || !status.hasCalendarAccess;
+
+    const statusParts: string[] = [];
+    if (status.connected) {
+        if (status.hasWriteAccess) statusParts.push("Docs ✅");
+        else statusParts.push("Docs ⚠️");
+        if (status.hasCalendarAccess) statusParts.push("Calendar ✅");
+        else statusParts.push("Calendar ⚠️");
+    }
+
+    return (
+        <div className={`mx-4 mt-3 flex items-center justify-between rounded-lg border px-3 py-2 ${
+            needsReauth
+                ? "border-amber-500/30 bg-amber-500/5"
+                : "border-emerald-500/30 bg-emerald-500/5"
+        }`}>
+            <div className="flex items-center gap-2">
+                <span className={`size-2 rounded-full ${needsReauth ? "bg-amber-400" : "bg-emerald-400"}`} />
+                <span className="text-[11px] text-zinc-400">
+                    {status.connected
+                        ? `Google: ${statusParts.join(" • ")}`
+                        : "Google: не подключён"}
+                </span>
+            </div>
+            {needsReauth && (
+                <a
+                    href="/api/auth/google"
+                    className="rounded-md bg-violet-600 px-3 py-1 text-[10px] font-medium text-white transition-colors hover:bg-violet-500"
+                >
+                    {status.connected ? "Обновить доступ" : "Подключить"}
+                </a>
+            )}
+        </div>
     );
 }

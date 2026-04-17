@@ -7,6 +7,7 @@ import type { OrbState } from "@/types/chat";
 // ── types ────────────────────────────────────────────────────
 interface ParticleOrbProps {
     state: OrbState;
+    context?: "" | "web" | "tool";
     audioLevel?: number;
     particleCount?: number;
     onClick?: () => void;
@@ -130,12 +131,15 @@ const VERTEX_SHADER = /* glsl */ `
 const FRAGMENT_SHADER = /* glsl */ `
     uniform vec3 uColorBase;
     uniform vec3 uColorSpeak;
+    uniform vec3 uColorSearch;
     uniform float uColorBlend;
+    uniform float uSearchBlend;
 
     varying float vAlpha;
 
     void main() {
-        vec3 col = mix(uColorBase, uColorSpeak, uColorBlend);
+        vec3 baseColor = mix(uColorBase, uColorSpeak, uColorBlend);
+        vec3 col = mix(baseColor, uColorSearch, uSearchBlend);
         gl_FragColor = vec4(col, vAlpha);
     }
 `;
@@ -145,20 +149,26 @@ interface OrbParams {
     intensity: number;
     audioReact: number;
     colorBlend: number; // 0 = base purple, 1 = speaking color
+    searchBlend: number; // 0 = no search, 1 = full neon blue
 }
 
-function stateToParams(state: OrbState): OrbParams {
+function stateToParams(state: OrbState, context: string = ""): OrbParams {
     switch (state) {
         case "idle":
-            return { intensity: 0.0, audioReact: 0.0, colorBlend: 0.0 };
+            return { intensity: 0.0, audioReact: 0.0, colorBlend: 0.0, searchBlend: 0.0 };
         case "listening":
-            return { intensity: 0.15, audioReact: 1.0, colorBlend: 0.0 };
+            return { intensity: 0.15, audioReact: 1.0, colorBlend: 0.0, searchBlend: 0.0 };
         case "thinking":
-            return { intensity: 0.85, audioReact: 0.0, colorBlend: 0.3 };
+            return {
+                intensity: 0.85,
+                audioReact: 0.0,
+                colorBlend: context === "web" ? 0.0 : 0.3,
+                searchBlend: context === "web" ? 0.85 : 0.0,
+            };
         case "speaking":
-            return { intensity: 0.4, audioReact: 0.8, colorBlend: 1.0 };
+            return { intensity: 0.4, audioReact: 0.8, colorBlend: 1.0, searchBlend: 0.0 };
         case "backgroundListening":
-            return { intensity: 0.05, audioReact: 0.2, colorBlend: 0.0 };
+            return { intensity: 0.05, audioReact: 0.2, colorBlend: 0.0, searchBlend: 0.0 };
     }
 }
 
@@ -204,6 +214,7 @@ function createParticleGeometry(count: number): THREE.BufferGeometry {
 // ── component ────────────────────────────────────────────────
 export function ParticleOrb({
     state,
+    context = "",
     audioLevel = 0,
     particleCount = DEFAULT_PARTICLES,
     onClick,
@@ -220,12 +231,17 @@ export function ParticleOrb({
     } | null>(null);
 
     const stateRef = useRef(state);
+    const contextRef = useRef(context);
     const audioRef = useRef(audioLevel);
 
     // синхронизируем refs с пропами после рендера
     useEffect(() => {
         stateRef.current = state;
     }, [state]);
+
+    useEffect(() => {
+        contextRef.current = context;
+    }, [context]);
 
     useEffect(() => {
         audioRef.current = audioLevel;
@@ -266,7 +282,9 @@ export function ParticleOrb({
                     uAudioReact: { value: 0 },
                     uColorBase: { value: new THREE.Color(0x8B5CF6) },
                     uColorSpeak: { value: new THREE.Color(0xBA38BE) },
+                    uColorSearch: { value: new THREE.Color(0x00D4FF) },
                     uColorBlend: { value: 0 },
+                    uSearchBlend: { value: 0 },
                 },
                 transparent: true,
                 depthWrite: false,
@@ -284,6 +302,7 @@ export function ParticleOrb({
             let smoothAudioReact = 0;
             let smoothAudio = 0;
             let smoothColorBlend = 0;
+            let smoothSearchBlend = 0;
             let scaledTime = 0;
             let rotTime = 0;
             let lastTime = 0;
@@ -297,7 +316,7 @@ export function ParticleOrb({
                 const elapsed = clock.getElapsedTime();
                 const dt = elapsed - lastTime;
                 lastTime = elapsed;
-                const params = stateToParams(stateRef.current);
+                const params = stateToParams(stateRef.current, contextRef.current);
                 const targetAudio = audioRef.current;
 
                 // gradual ramp — takes ~3 seconds to fully transition
@@ -307,6 +326,8 @@ export function ParticleOrb({
                     (params.audioReact - smoothAudioReact) * LERP_STATE;
                 smoothColorBlend +=
                     (params.colorBlend - smoothColorBlend) * 0.03;
+                smoothSearchBlend +=
+                    (params.searchBlend - smoothSearchBlend) * 0.04;
                 smoothAudio += (targetAudio - smoothAudio) * LERP_AUDIO;
 
                 // accumulate scaled time: base speed + intensity boost
@@ -320,6 +341,7 @@ export function ParticleOrb({
                 material.uniforms.uIntensity.value = smoothIntensity;
                 material.uniforms.uAudioReact.value = smoothAudioReact;
                 material.uniforms.uColorBlend.value = smoothColorBlend;
+                material.uniforms.uSearchBlend.value = smoothSearchBlend;
 
                 // gentle auto-rotation
                 points.rotation.y = elapsed * 0.08;

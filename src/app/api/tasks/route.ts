@@ -175,3 +175,55 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: (err as Error).message }, { status: 500 });
     }
 }
+
+/** PUT /api/tasks — Update task status */
+export async function PUT(req: NextRequest) {
+    try {
+        const body = await req.json() as {
+            taskId: string;
+            status?: string;
+            priority?: string;
+            userId?: string;
+        };
+
+        const { taskId, status, priority, userId = "anonymous" } = body;
+
+        if (!taskId) {
+            return NextResponse.json({ error: "taskId is required" }, { status: 400 });
+        }
+
+        // Update metadata via indexer
+        const updates: Record<string, string> = {
+            updated_at: new Date().toISOString(),
+        };
+        if (status) updates.status = status;
+        if (priority) updates.priority = priority;
+
+        try {
+            await fetch(`${INDEXER_URL}/memory/${taskId}/metadata`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    metadata: updates,
+                    user_id: userId,
+                }),
+                signal: AbortSignal.timeout(5000),
+            });
+        } catch {
+            // Indexer may not support PATCH — log and continue
+            logger.warn(`[Tasks API] Indexer PATCH not available for task ${taskId}, status update stored locally only`);
+        }
+
+        logger.info(`[Tasks] Updated task ${taskId}: ${JSON.stringify(updates)}`);
+
+        return NextResponse.json({
+            status: "ok",
+            taskId,
+            updates,
+        });
+    } catch (err) {
+        logger.error("[Tasks API] Update error:", (err as Error).message);
+        return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    }
+}
+

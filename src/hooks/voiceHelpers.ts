@@ -310,12 +310,12 @@ export async function prefetchGeminiTTS(
 }
 
 /**
- * Clean assistant response text: strip DSML, counter tags, preferences, JSON artifacts.
+ * Clean assistant response text: strip DSML, preferences, JSON artifacts.
+ * Counter tags [COUNTER:*] are preserved for badge rendering in MessageBubble.
  */
 export function cleanResponseText(raw: string): string {
     let text = stripDSML(raw);
-    const counterTypes = detectCounterTypes(text);
-    if (counterTypes.length > 0) text = stripCounterTag(text);
+    // Counter tags are kept — they render as colored badges in ChatArea
     text = stripPrefTag(text);
     text = text.replace(/^\{["']?\s*/, "").replace(/\s*["']?\}$/, "");
     text = text.replace(/^["']+|["']+$/g, "");

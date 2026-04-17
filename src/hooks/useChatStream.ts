@@ -114,8 +114,8 @@ export function useChatStream() {
                     const content = parsed.choices?.[0]?.delta?.content;
                     if (content) {
                         accumulated += content;
-                        // Strip DSML and counter tags in real-time so chat bubble never shows them
-                        updateLastAssistantMessage({ content: stripPrefTag(stripCounterTag(stripDSML(accumulated))) });
+                        // Strip DSML and pref tags in real-time (keep counter tags for badge rendering)
+                        updateLastAssistantMessage({ content: stripPrefTag(stripDSML(accumulated)) });
 
                         // Check if we've entered a DSML block — stop feeding sentences to TTS
                         const dsmlStartPattern = /<\s*\|?\s*(?:DSML|function_calls?|antml|invoke)/i;

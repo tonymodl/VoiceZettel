@@ -52,6 +52,15 @@ export type AiProvider = "openai" | "google" | "deepseek";
 export type TtsProvider = "browser" | "edge" | "yandex" | "openai" | "local" | "piper" | "qwen" | "gemini";
 export type VoiceMode = "cloud" | "local" | "browser" | "yandex" | "gemini-live";
 
+export interface ContextPriorities {
+    critical: number;
+    active: number;
+    predicted: number;
+    recent: number;
+    vault: number;
+    tools: number;
+}
+
 export interface SettingsState {
     showUsdTokens: boolean;
     showRubTokens: boolean;
@@ -99,6 +108,17 @@ export interface SettingsState {
     voiceUrlAccess: boolean;
     /** Create tasks, save notes, manage work */
     voiceTaskManagement: boolean;
+    /** Google Docs/Sheets direct integration */
+    voiceGoogleDocs: boolean;
+    /** Google Calendar direct integration */
+    voiceGoogleCalendar: boolean;
+    // ── Antigravity Agent Settings ───────────────────────────
+    /** Voice notifications when tasks complete */
+    voiceNotifications: boolean;
+    /** Autonomy level 0-10 (0=auto, 1=manual, 10=full autonomy) */
+    autonomyLevel: number;
+    /** Context window slot budget percentages */
+    contextPriorities: ContextPriorities;
 }
 
 export interface SettingsActions {
@@ -141,4 +161,10 @@ export interface SettingsActions {
     toggleVoiceSystemStatus: () => void;
     toggleVoiceUrlAccess: () => void;
     toggleVoiceTaskManagement: () => void;
+    toggleVoiceGoogleDocs: () => void;
+    toggleVoiceGoogleCalendar: () => void;
+    // ── Antigravity Agent Settings actions ───────────────────
+    toggleVoiceNotifications: () => void;
+    setAutonomyLevel: (level: number) => void;
+    setContextPriorities: (priorities: ContextPriorities) => void;
 }

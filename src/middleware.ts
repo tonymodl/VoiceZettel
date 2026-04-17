@@ -8,7 +8,8 @@ export const config = {
          * - _next/image (image optimization)
          * - favicon.ico, sitemap.xml, robots.txt
          * - public assets
+         * - ALL API routes (they handle their own auth or are internal-only)
          */
-        "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|api/health|api/health-openai|api/voice-health|api/auto-heal|api/api-credits|api/indexer|api/telegram|api/obsidian|api/auth|api/workspace|.*\\.png$|.*\\.jpg$|.*\\.svg$|.*\\.ico$).*)",
+        "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|api/|.*\\.png$|.*\\.jpg$|.*\\.svg$|.*\\.ico$).*)",
     ],
 };

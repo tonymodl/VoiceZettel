@@ -21,7 +21,27 @@ const nextConfig: NextConfig = {
     },
     allowedDevOrigins: ["https://voicezettel.ru", "http://voicezettel.ru"],
     devIndicators: false,
-    turbopack: {},
+    turbopack: {
+        // CRITICAL: Do NOT watch data/ dir — API routes write logs/settings there,
+        // triggering infinite Fast Refresh loop that kills WS connections
+        resolveAlias: {},
+    },
+    webpack: (config, { dev }) => {
+        if (dev) {
+            // Exclude data/ from file watching to prevent Hot Reload loops
+            config.watchOptions = {
+                ...config.watchOptions,
+                ignored: [
+                    '**/node_modules/**',
+                    '**/data/**',
+                    '**/.antigravity/**',
+                    '**/VoiceZettel/**',
+                    '**/.next/**',
+                ],
+            };
+        }
+        return config;
+    },
     output: "standalone",
     images: {
         remotePatterns: [

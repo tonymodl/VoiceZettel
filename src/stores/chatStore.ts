@@ -7,6 +7,7 @@ export type OrbMode = "voice" | "lavalier" | "agent";
 interface ChatState {
     messages: Message[];
     orbState: OrbState;
+    orbContext: "" | "web" | "tool";
     modality: ModalityMode;
     audioLevel: number;
     orbMode: OrbMode;
@@ -20,6 +21,7 @@ interface ChatActions {
     updateLastAssistantMessage: (partial: Partial<Message>) => void;
     insertMessageBeforeLastAssistant: (message: Message) => void;
     setOrbState: (state: OrbState) => void;
+    setOrbContext: (ctx: "" | "web" | "tool") => void;
     setModality: (mode: ModalityMode) => void;
     setAudioLevel: (level: number) => void;
     setOrbMode: (mode: OrbMode) => void;
@@ -42,6 +44,7 @@ export const useChatStore = create<ChatState & ChatActions>()(
         (set) => ({
             messages: SEED_MESSAGES,
             orbState: "idle",
+            orbContext: "" as "" | "web" | "tool",
             modality: "voice",
             audioLevel: 0,
             orbMode: "voice" as OrbMode,
@@ -85,6 +88,7 @@ export const useChatStore = create<ChatState & ChatActions>()(
                 }),
 
             setOrbState: (orbState) => set({ orbState }),
+            setOrbContext: (orbContext) => set({ orbContext }),
             setModality: (modality) => set({ modality }),
             setAudioLevel: (audioLevel) => set({ audioLevel }),
             setOrbMode: (orbMode) => set({ orbMode }),

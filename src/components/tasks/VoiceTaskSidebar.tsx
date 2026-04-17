@@ -48,13 +48,40 @@ export function VoiceTaskSidebar({ userId }: { userId: string }) {
     const fetchTasks = useCallback(async () => {
         setLoading(true);
         try {
-            const params = new URLSearchParams({ userId });
-            if (filter !== "all") params.set("status", filter);
-            const res = await fetch(`/api/tasks?${params}`);
-            if (res.ok) {
-                const data = await res.json() as { tasks: TaskItem[] };
-                setTasks(data.tasks);
-            }
+            const allTasks: TaskItem[] = [];
+
+            // Source 1: ChromaDB via /api/tasks
+            try {
+                const params = new URLSearchParams({ userId });
+                if (filter !== "all") params.set("status", filter);
+                const res = await fetch(`/api/tasks?${params}`, { signal: AbortSignal.timeout(4000) });
+                if (res.ok) {
+                    const data = await res.json() as { tasks: TaskItem[] };
+                    allTasks.push(...(data.tasks || []));
+                }
+            } catch { /* ChromaDB offline */ }
+
+            // Source 2: Local filesystem via /api/tasks/local
+            try {
+                const res = await fetch("/api/tasks/local", { signal: AbortSignal.timeout(3000) });
+                if (res.ok) {
+                    const data = await res.json() as { tasks: TaskItem[] };
+                    allTasks.push(...(data.tasks || []));
+                }
+            } catch { /* filesystem read failed */ }
+
+            // Deduplicate by title
+            const seen = new Set<string>();
+            const unique = allTasks.filter((t) => {
+                const key = t.title.toLowerCase().trim();
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+
+            // Apply filter client-side if we merged local tasks
+            const filtered = filter === "all" ? unique : unique.filter((t) => t.status === filter);
+            setTasks(filtered);
         } catch {
             /* ignore */
         } finally {
@@ -95,6 +122,25 @@ export function VoiceTaskSidebar({ userId }: { userId: string }) {
 
     const activeCount = tasks.filter((t) => t.status === "pending" || t.status === "in_progress").length;
     const doneCount = tasks.filter((t) => t.status === "done").length;
+
+    const handleStatusChange = useCallback(async (taskId: string, newStatus: TaskItem["status"]) => {
+        // Optimistic update
+        setTasks((prev) =>
+            prev.map((t) =>
+                t.id === taskId ? { ...t, status: newStatus, updatedAt: new Date().toISOString() } : t
+            )
+        );
+        try {
+            await fetch(`/api/tasks`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ taskId, status: newStatus, userId }),
+            });
+        } catch {
+            // Revert on failure
+            void fetchTasks();
+        }
+    }, [userId, fetchTasks]);
 
     const filteredTasks = filter === "all" ? tasks : tasks.filter((t) => t.status === filter);
 
@@ -236,17 +282,73 @@ export function VoiceTaskSidebar({ userId }: { userId: string }) {
 
                                     {/* Expanded details */}
                                     <AnimatePresence>
-                                        {isExpanded && task.description && (
+                                        {isExpanded && (
                                             <motion.div
                                                 initial={{ opacity: 0, height: 0 }}
                                                 animate={{ opacity: 1, height: "auto" }}
                                                 exit={{ opacity: 0, height: 0 }}
                                                 className="overflow-hidden"
                                             >
-                                                <div className="mt-2 pt-2 border-t border-zinc-800/50">
-                                                    <p className="text-[11px] text-zinc-400 leading-relaxed whitespace-pre-wrap">
-                                                        {task.description}
-                                                    </p>
+                                                <div className="mt-2 pt-2 border-t border-zinc-800/50 space-y-2">
+                                                    {task.description && (
+                                                        <p className="text-[11px] text-zinc-400 leading-relaxed whitespace-pre-wrap">
+                                                            {task.description}
+                                                        </p>
+                                                    )}
+
+                                                    {/* Tags */}
+                                                    {task.tags && task.tags.length > 0 && (
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {task.tags.map((tag) => (
+                                                                <span
+                                                                    key={tag}
+                                                                    className="rounded-full bg-violet-500/10 px-2 py-0.5 text-[9px] text-violet-400"
+                                                                >
+                                                                    #{tag}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
+
+                                                    {/* Action buttons */}
+                                                    <div className="flex items-center gap-1.5 pt-1">
+                                                        {task.status === "pending" && (
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    void handleStatusChange(task.id, "in_progress");
+                                                                }}
+                                                                className="flex items-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-[10px] font-medium text-blue-400 transition hover:bg-blue-500/20"
+                                                            >
+                                                                <ArrowUpRight className="size-3" />
+                                                                Запустить
+                                                            </button>
+                                                        )}
+                                                        {(task.status === "pending" || task.status === "in_progress") && (
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    void handleStatusChange(task.id, "done");
+                                                                }}
+                                                                className="flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-medium text-emerald-400 transition hover:bg-emerald-500/20"
+                                                            >
+                                                                <CheckCircle2 className="size-3" />
+                                                                Готово
+                                                            </button>
+                                                        )}
+                                                        {task.status !== "cancelled" && task.status !== "done" && (
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    void handleStatusChange(task.id, "cancelled");
+                                                                }}
+                                                                className="flex items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[10px] font-medium text-red-400 transition hover:bg-red-500/20"
+                                                            >
+                                                                <XCircle className="size-3" />
+                                                                Отменить
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </motion.div>
                                         )}

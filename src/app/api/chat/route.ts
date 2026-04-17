@@ -138,13 +138,26 @@ function handleDeepSeek(
     isVoice: boolean,
 ): Response {
     // DeepSeek doesn't support multimodal — extract text only
-    const finalMsgs: Array<Record<string, unknown>> = [
-        { role: "system", content: enrichedPrompt },
-        ...messages.map((m) => ({ role: m.role, content: extractTextContent(m.content) })),
-    ];
+    const textMessages = messages.map((m) => ({ role: m.role, content: extractTextContent(m.content) }));
 
-    // DeepSeek streams directly (no tools — it outputs DSML text instead)
-    const streamPromise = deepseekProvider.streamChat(finalMsgs);
+    const streamPromise = (async () => {
+        let finalMsgs: Array<Record<string, unknown>>;
+
+        if (isVoice) {
+            // Voice mode: skip tools, stream directly
+            finalMsgs = [
+                { role: "system", content: enrichedPrompt },
+                ...textMessages,
+            ];
+        } else {
+            // Text mode: use function calling (web_search, save_memory, etc.)
+            const { finalMessages } = await deepseekProvider.callWithTools(userId, textMessages as Array<{ role: string; content: string | ContentPart[] }>, enrichedPrompt);
+            finalMsgs = finalMessages;
+        }
+
+        return deepseekProvider.streamChat(finalMsgs);
+    })();
+
     const wrappedStream = new ReadableStream<Uint8Array>({
         async start(controller) {
             try {

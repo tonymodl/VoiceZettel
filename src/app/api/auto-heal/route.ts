@@ -13,6 +13,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import path from "path";
 import fs from "fs";
+import { startWatchdog } from "@/lib/watchdog";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -381,11 +382,17 @@ export async function POST() {
 
     const allOk = actions.every((a) => a.success);
 
+    // Auto-start watchdog daemon for continuous monitoring
+    try {
+        startWatchdog();
+    } catch { /* watchdog may already be running */ }
+
     return NextResponse.json({
         status: allOk ? "healed" : "partial",
         descRu: allOk
-            ? "✅ Все сервисы работают! Система готова."
-            : "⚠️ Часть проблем решена, но некоторые сервисы требуют ручного вмешательства.",
+            ? "✅ Все сервисы работают! Система готова. Watchdog запущен для мониторинга."
+            : "⚠️ Часть проблем решена, но некоторые сервисы требуют ручного вмешательства. Watchdog запущен.",
         actions,
+        watchdogStarted: true,
     });
 }

@@ -219,6 +219,8 @@ class SearchRequest(BaseModel):
     query: str
     top_k: int = 5
     source_type: Optional[str] = None  # telegram | session | zettelkasten | None=all
+    chat_type: Optional[str] = None  # private | group | supergroup | channel | None=all
+    where: Optional[dict] = None  # raw ChromaDB where filter (overrides source_type/chat_type)
 
 
 class IndexFileRequest(BaseModel):
@@ -315,8 +317,15 @@ async def search(req: SearchRequest):
 
     # Build where filter
     where = None
-    if req.source_type:
+    if req.where:
+        # Raw where filter from client (highest priority)
+        where = req.where
+    elif req.source_type and req.chat_type:
+        where = {"$and": [{"source_type": req.source_type}, {"chat_type": req.chat_type}]}
+    elif req.source_type:
         where = {"source_type": req.source_type}
+    elif req.chat_type:
+        where = {"chat_type": req.chat_type}
 
     # Query ChromaDB
     results = col.query(

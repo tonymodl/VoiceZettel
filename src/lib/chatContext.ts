@@ -10,7 +10,9 @@ import {
     preloadFromVault,
 } from "@/lib/memoryStore";
 import { loadVaultContext, loadVaultNotes } from "@/lib/vaultContext";
+import { buildGoldenContextBlock } from "@/lib/goldenContext";
 import { logger } from "@/lib/logger";
+import { formatBangkokNow } from "@/lib/timezone";
 
 const INDEXER_URL = process.env.INDEXER_SERVICE_URL ?? "http://127.0.0.1:8030";
 
@@ -194,7 +196,30 @@ const DEFAULT_RULES = `
 ### 3. Память
 - save_memory — запомнить важную информацию о пользователе (ВЫЗЫВАЙ ВСЕГДА при личных данных!)
 - search_memory — найти ранее сохранённую информацию
-Активно запоминай ВСЮ новую информацию без просьбы. Любой личный факт = save_memory.`;
+Активно запоминай ВСЮ новую информацию без просьбы. Любой личный факт = save_memory.
+
+### 4. Маршрутизация источников знаний
+У тебя есть ДВА источника знаний. Выбирай ПРАВИЛЬНЫЙ:
+
+📂 ДОЛГОВРЕМЕННАЯ ПАМЯТЬ (Obsidian, память, контекст) — используй search_memory если пользователь спрашивает про:
+   - Свои дела, проекты, записи, задачи
+   - Контекст прошлых разговоров
+   - Личную информацию, которую он ранее упоминал
+
+🌐 ИНТЕРНЕТ (web_search) — ОБЯЗАТЕЛЬНО используй если вопрос касается:
+   - Актуальной информации: погода, курсы валют, новости, цены
+   - Фактов, которые могут устареть: расписания, события, статистика
+   - Чего-то, чего ты не знаешь наверняка из обучающих данных
+
+⚠️ НИКОГДА не выдумывай актуальные данные. Если не уверен — ВЫЗОВИ web_search.
+
+### 5. АНТИ-ГАЛЛЮЦИНАЦИЯ (КРИТИЧЕСКИЙ ПРИОРИТЕТ)
+🚫 НИКОГДА не выдумывай имена, даты, факты, цифры, названия проектов
+🚫 Если данных нет — скажи «Не знаю, давай поищу» и вызови search_memory или web_search
+🚫 Если tool вернул error — скажи «Не получилось» с причиной. НЕ выдумывай результат
+🚫 Если tool вернул 0 результатов — скажи «Ничего не нашла». НЕ придумывай
+🚫 НИКОГДА не говори «Сохранила/Создала» пока не получишь успешный ответ от инструмента
+🚫 Все ответы о фактах ДОЛЖНЫ быть подкреплены search_memory, ChromaDB или web_search`;
 
 export interface EnrichPromptOptions {
     systemPrompt: string;
@@ -213,6 +238,14 @@ export interface EnrichPromptOptions {
  */
 export function buildEnrichedPrompt(opts: EnrichPromptOptions): string {
     let prompt = opts.systemPrompt;
+
+    // ═══ DATE/TIME — UTC+7 ═══
+    prompt += `\n\nТекущая дата и время: ${formatBangkokNow()}`;
+
+    // ═══ GOLDEN CONTEXT — injected FIRST, NEVER evicted ═══
+    // This block contains the user's inner circle (family, team, investors).
+    // It must appear before any dynamic context to guarantee presence.
+    prompt += "\n\n" + buildGoldenContextBlock();
 
     // Provider/mode-specific rules
     if (opts.isVoice) {

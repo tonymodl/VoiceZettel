@@ -45,6 +45,7 @@ export function useVoiceSession() {
     const addMessage = useChatStore((s) => s.addMessage);
     const updateLastAssistantMessage = useChatStore((s) => s.updateLastAssistantMessage);
     const setOrbState = useChatStore((s) => s.setOrbState);
+    const setOrbContext = useChatStore((s) => s.setOrbContext);
     const setModality = useChatStore((s) => s.setModality);
     const setAudioLevel = useChatStore((s) => s.setAudioLevel);
     const setLiveTranscript = useChatStore((s) => s.setLiveTranscript);
@@ -66,6 +67,7 @@ export function useVoiceSession() {
     const playbackResolveRef = useRef<(() => void) | null>(null);
     const activeQueueRef = useRef<AsyncQueue<SentenceJob> | null>(null);
     const bargeInRafRef = useRef<number | null>(null);
+    const sessionStartRef = useRef<string>("");
 
     // ── Cleanup TTS ──
     const cleanupTTS = useCallback(() => {
@@ -524,21 +526,27 @@ export function useVoiceSession() {
             // Antigravity: Шаг 2 — reuse cached Gemini token if available, otherwise fetch
             let wsUrl: string;
             let vaultContext = "";
+            let compiledRules = "";
+            let empathyBlock = "";
             if (cacheValid && prewarmCache.geminiToken) {
                 wsUrl = prewarmCache.geminiToken.wsUrl;
                 vaultContext = prewarmCache.geminiToken.vaultContext;
-                logger.info("[Antigravity] Reusing pre-warmed Gemini token (0ms)");
+                compiledRules = prewarmCache.geminiToken.compiledRules ?? "";
+                empathyBlock = prewarmCache.geminiToken.empathyBlock ?? "";
+                logger.info(`[Antigravity] Reusing pre-warmed Gemini token (0ms, context: ${vaultContext.length}ch, rules: ${compiledRules.length}ch)`);
             } else {
                 try {
                     const res = await fetch("/api/gemini-live-token", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ userId }),
+                        body: JSON.stringify({ userId, contextPriorities: useSettingsStore.getState().contextPriorities }),
                     });
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const json = await res.json() as {
                         wsUrl?: string;
                         vaultContext?: string;
+                        compiledRules?: string;
+                        empathyBlock?: string;
                         disabled?: boolean;
                         reason?: string;
                     };
@@ -554,6 +562,8 @@ export function useVoiceSession() {
                     }
                     wsUrl = json.wsUrl!;
                     vaultContext = json.vaultContext ?? "";
+                    compiledRules = json.compiledRules ?? "";
+                    empathyBlock = json.empathyBlock ?? "";
                 } catch (err) {
                     if (!micFromCache) micStream.getTracks().forEach((t) => t.stop());
                     useNotificationStore.getState().addNotification(
@@ -586,14 +596,18 @@ export function useVoiceSession() {
             } as unknown as LocalVoiceClient;
 
             setIsVoiceActive(true);
+            sessionStartRef.current = new Date().toISOString();
             isStartingRef.current = false;
 
             connectGeminiLive({
                 wsUrl,
                 micStream,
                 vaultContext,
+                compiledRules,
+                empathyBlock,
                 onTranscript: (text: string) => setLiveTranscript(text),
                 onOrbState: (state) => setOrbState(state),
+                onOrbContext: (ctx) => setOrbContext(ctx),
                 onAudioLevel: (level: number) => setAudioLevel(level),
                 onMessage: (userText: string, assistantText: string) => {
                     setLiveTranscript("");
@@ -647,6 +661,15 @@ export function useVoiceSession() {
                             }
                         })();
                     }
+
+                    // 🧠 OpenAI Memory Processor: extract requirements, mood, facts (fire-and-forget)
+                    if (userText && userText.trim().length > 10) {
+                        void fetch("/api/memory-process", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ userId, userText, assistantText }),
+                        }).catch(() => { /* fire-and-forget */ });
+                    }
                 },
                 onLog: (msg: string, data?: unknown) => logger.remoteLog("info", "[GeminiLive] " + msg, data),
                 capabilities: {
@@ -655,6 +678,8 @@ export function useVoiceSession() {
                     voiceSystemStatus: useSettingsStore.getState().voiceSystemStatus,
                     voiceUrlAccess: useSettingsStore.getState().voiceUrlAccess,
                     voiceTaskManagement: useSettingsStore.getState().voiceTaskManagement,
+                    voiceGoogleDocs: useSettingsStore.getState().voiceGoogleDocs,
+                    voiceGoogleCalendar: useSettingsStore.getState().voiceGoogleCalendar,
                 },
             });
 
@@ -814,6 +839,7 @@ export function useVoiceSession() {
 
             await client.start();
             setIsVoiceActive(true);
+            sessionStartRef.current = new Date().toISOString();
 
             // Создаём <audio> элемент для TTS если ещё нет
             if (!edgeTtsAudioElRef.current) {
@@ -871,6 +897,35 @@ export function useVoiceSession() {
 
     // ── Stop voice session ──
     const stopVoice = useCallback(() => {
+        // Fire-and-forget: save session summary for context continuity
+        try {
+            const messages = useChatStore.getState().messages;
+            const transcript = messages
+                .filter((m) => m.role === "user" || m.role === "assistant")
+                .map((m) => ({ role: m.role, text: m.content }));
+            if (transcript.length >= 2) {
+                const now = new Date().toISOString();
+                const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+                fetch("/api/session-summary", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        userId,
+                        transcript,
+                        sessionMeta: {
+                            sessionId: `s_${Date.now()}`,
+                            startedAt: sessionStartRef.current || now,
+                            endedAt: now,
+                            durationMs: sessionStartRef.current
+                                ? Date.now() - new Date(sessionStartRef.current).getTime()
+                                : 0,
+                            deviceType: isMobile ? "mobile" : "desktop",
+                        },
+                    }),
+                }).catch(() => { /* silent */ });
+            }
+        } catch { /* silent */ }
+
         if (clientRef.current) {
             clientRef.current.stop();
             clientRef.current = null;
@@ -904,7 +959,7 @@ export function useVoiceSession() {
         setIsVoiceActive(false);
         setOrbState("idle");
         setModality("text");
-    }, [setOrbState, setModality, setAudioLevel, setLiveTranscript, cleanupTTS, stopRecognition, abortChat]);
+    }, [setOrbState, setModality, setAudioLevel, setLiveTranscript, cleanupTTS, stopRecognition, abortChat, userId]);
 
     // ── Interrupt speaking (tap-to-interrupt) ──
     const interruptSpeaking = useCallback(() => {

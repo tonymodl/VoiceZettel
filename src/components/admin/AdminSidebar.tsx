@@ -25,6 +25,7 @@ const NAV_ITEMS: Array<{
         { tab: "logs", label: "Логи", icon: ScrollText },
         { tab: "prompts", label: "Промпты", icon: BrainCircuit },
         { tab: "telegram", label: "Telegram", icon: MessageSquare },
+        { tab: "dunbar", label: "Круги Данбара", icon: Users },
         { tab: "users", label: "Пользователи", icon: Users },
         { tab: "mission-control", label: "Mission Control", icon: Activity },
         { tab: "workspace", label: "Документы", icon: FileText },

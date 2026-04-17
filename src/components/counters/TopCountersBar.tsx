@@ -87,7 +87,7 @@ function CounterBadge({
                 </motion.span>
             </div>
             {/* Label below */}
-            <span className="text-xs leading-none text-zinc-500">
+            <span className="hidden text-xs leading-none text-zinc-500 sm:block">
                 {label}
             </span>
         </motion.div>
@@ -130,7 +130,7 @@ function TokenDisplay({
                     {parts.join(" / ")}
                 </span>
             </div>
-            <span className="text-xs leading-none text-zinc-500">
+            <span className="hidden text-xs leading-none text-zinc-500 sm:block">
                 Потрачено
             </span>
         </motion.div>
@@ -153,9 +153,9 @@ function OpenAIBalanceDisplay({
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.8 }}
             transition={{ duration: 0.2 }}
-            className="flex flex-col items-end gap-0.5"
+            className="flex flex-col items-end gap-0.5 shrink-0"
         >
-            <div className={`flex h-7 items-center gap-1 rounded-full px-2.5 ${
+            <div className={`flex h-7 items-center gap-1 rounded-full px-2 sm:px-2.5 ${
                 error
                     ? "bg-amber-500/10"
                     : balanceUsd > 1
@@ -169,7 +169,7 @@ function OpenAIBalanceDisplay({
                             ? "text-emerald-400"
                             : "text-red-400"
                 }`} />
-                <span className={`text-xs font-semibold leading-none ${
+                <span className={`text-[10px] sm:text-xs font-semibold leading-none ${
                     error
                         ? "text-amber-300"
                         : balanceUsd > 1
@@ -182,7 +182,7 @@ function OpenAIBalanceDisplay({
                     }
                 </span>
             </div>
-            <span className="text-xs leading-none text-zinc-500">
+            <span className="hidden text-xs leading-none text-zinc-500 sm:block">
                 {error ? "Баланс N/A" : "Баланс OpenAI"}
             </span>
         </motion.div>
@@ -274,7 +274,7 @@ export function TopCountersBar() {
     if (visibleBadges.length === 0 && !hasTokens && !showOpenAIBalance) return null;
 
     return (
-        <div className="flex shrink-0 flex-wrap items-start justify-between gap-2 overflow-x-auto py-2 scrollbar-none">
+        <div className="flex shrink-0 flex-wrap items-start justify-between gap-2 py-2 overflow-hidden">
             {/* Left: counter badges */}
             <div className="flex items-start gap-2">
                 <AnimatePresence mode="popLayout">

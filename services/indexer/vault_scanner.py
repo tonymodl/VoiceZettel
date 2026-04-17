@@ -195,7 +195,9 @@ class VaultScanner:
             logger.error(f"Cannot read {file_path}: {e}")
             return []
 
-        if len(content.strip()) < 20:
+        # Allow very short content (e.g., single Telegram messages like "[08:57] Привет")
+        # Previous threshold of 20 silently rejected valid real-time messages
+        if len(content.strip()) < 5:
             return []
 
         # Relative path from vault root
@@ -207,6 +209,19 @@ class VaultScanner:
         source_type = _detect_source_type(rel_path)
         frontmatter, body = _extract_frontmatter(content)
         title = frontmatter.get("title") or frontmatter.get("chat") or _extract_title(body, path.name)
+
+        # For Telegram files: extract chat_type from path and use parent dir as title
+        chat_type = frontmatter.get("type")
+        if source_type == "telegram":
+            rel_lower = rel_path.replace("\\", "/").lower()
+            if "личные" in rel_lower or "private" in rel_lower:
+                chat_type = "private"
+            elif "группы" in rel_lower or "group" in rel_lower:
+                chat_type = "group"
+            # Use parent directory name as title (= chat name in Telegram)
+            parent_name = path.parent.name
+            if parent_name and parent_name not in ("Личные", "Группы", "Telegram", "Raw_v2"):
+                title = parent_name
 
         # Extract date from frontmatter or filename
         date_str = frontmatter.get("date", "")
@@ -234,7 +249,7 @@ class VaultScanner:
                 total_chunks=len(chunks),
                 metadata={
                     "date": str(date_str) if date_str else None,
-                    "chat_type": frontmatter.get("type"),
+                    "chat_type": chat_type,
                 },
             )
             docs.append(doc)

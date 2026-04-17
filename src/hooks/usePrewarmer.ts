@@ -26,7 +26,7 @@ import { logger } from "@/lib/logger";
 /** Cached pre-warming results, exposed via window for startVoice() fallback reads */
 interface PrewarmCache {
     micStream: MediaStream | null;
-    geminiToken: { wsUrl: string; vaultContext: string } | null;
+    geminiToken: { wsUrl: string; vaultContext: string; compiledRules: string; empathyBlock: string } | null;
     realtimeToken: string | null;
     localCoreAvailable: boolean | null;
     timestamp: number;
@@ -112,13 +112,18 @@ export function usePrewarmer() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ userId: "prewarm" }),
-            signal: AbortSignal.timeout(5000),
+            signal: AbortSignal.timeout(10000),
         })
             .then(res => res.ok ? res.json() : null)
             .then(data => {
                 if (data && !data.disabled && data.wsUrl) {
-                    cache.geminiToken = { wsUrl: data.wsUrl, vaultContext: data.vaultContext ?? "" };
-                    logger.info("[Prewarm] Gemini token cached");
+                    cache.geminiToken = {
+                        wsUrl: data.wsUrl,
+                        vaultContext: data.vaultContext ?? "",
+                        compiledRules: data.compiledRules ?? "",
+                        empathyBlock: data.empathyBlock ?? "",
+                    };
+                    logger.info(`[Prewarm] Gemini token cached (context: ${(data.vaultContext ?? "").length}ch, rules: ${(data.compiledRules ?? "").length}ch)`);
                 }
             })
             .catch(() => { /* fallback in startVoice */ });
