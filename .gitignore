@@ -98,3 +98,10 @@ services/telegram/export_progress.json
 
 # Google OAuth tokens (contains auth secrets — NEVER commit)
 .google/
+
+
+# Ignored by AI agent
+chroma_data/
+bm25_data/
+*.db
+
