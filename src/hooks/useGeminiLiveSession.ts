@@ -142,6 +142,9 @@ export function useGeminiLiveSession() {
     const sessionStartRef = useRef<string>("");
 
     /* ── Play received PCM audio ── */
+    // Sequential audio queue: schedules chunks back-to-back for gapless playback
+    const nextPlayTimeRef = useRef(0);
+
     const playPcmAudio = useCallback((base64Data: string) => {
         const rawBuf = base64ToArrayBuffer(base64Data);
         const int16 = new Int16Array(rawBuf);
@@ -151,6 +154,7 @@ export function useGeminiLiveSession() {
 
         if (!playbackCtxRef.current || playbackCtxRef.current.state === "closed") {
             playbackCtxRef.current = new AudioContext({ sampleRate: PLAYBACK_SAMPLE_RATE });
+            nextPlayTimeRef.current = 0;
         }
 
         const ctx = playbackCtxRef.current;
@@ -160,7 +164,12 @@ export function useGeminiLiveSession() {
         const source = ctx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(ctx.destination);
-        source.start();
+
+        // Schedule sequentially: each chunk starts right after the previous one ends
+        const now = ctx.currentTime;
+        const startTime = Math.max(now, nextPlayTimeRef.current);
+        source.start(startTime);
+        nextPlayTimeRef.current = startTime + audioBuffer.duration;
     }, []);
 
     /* ── Handle incoming WS messages ── */
@@ -212,23 +221,46 @@ export function useGeminiLiveSession() {
         const lines = sessionTranscriptRef.current;
         if (lines.length < 2) return; // Nothing meaningful to analyze
 
-        const fullTranscript = lines.join("\n");
         const sessionStart = sessionStartRef.current;
 
+        // Convert raw lines ("USER: text" / "ASSISTANT: text") into structured format
+        // expected by /api/session-summary POST handler
+        const transcript: Array<{ role: string; text: string }> = [];
+        for (const line of lines) {
+            if (line.startsWith("USER: ")) {
+                transcript.push({ role: "user", text: line.slice(6) });
+            } else if (line.startsWith("ASSISTANT: ")) {
+                transcript.push({ role: "assistant", text: line.slice(11) });
+            }
+        }
+
+        if (transcript.length < 2) return;
+
         try {
-            await fetch("/api/session-analytics", {
+            // CRITICAL: POST to /api/session-summary (NOT /api/session-analytics which is GET-only!)
+            // This triggers the full memory pipeline:
+            //   saveSessionSummary() → analyzeSession() → evolveEmpathyProfile() → synthesizeRequirements()
+            const res = await fetch("/api/session-summary", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    transcript: fullTranscript,
-                    sessionStart,
-                    sessionEnd: new Date().toISOString(),
-                    userId: "anonymous", // Will be overridden server-side
+                    userId: "anonymous", // Overridden server-side
+                    transcript,
+                    sessionMeta: {
+                        sessionId: `gemini_live_${Date.now()}`,
+                        startedAt: sessionStart,
+                        endedAt: new Date().toISOString(),
+                        durationMs: Date.now() - new Date(sessionStart).getTime(),
+                    },
                 }),
             });
-            logger.info("[GeminiLive] Session analytics submitted");
+            if (res.ok) {
+                logger.info(`[GeminiLive] ✅ Session summary saved (${transcript.length} turns)`);
+            } else {
+                logger.error(`[GeminiLive] Session summary failed: ${res.status}`);
+            }
         } catch (err) {
-            logger.error("[GeminiLive] Failed to submit session analytics:", err);
+            logger.error("[GeminiLive] Failed to submit session summary:", err);
         }
 
         // Reset for next session
@@ -253,11 +285,13 @@ export function useGeminiLiveSession() {
 
     /* ── Connect ── */
     const connect = useCallback(
-        async (systemPrompt?: string) => {
-            // Save for reconnection
-            lastSystemPromptRef.current = systemPrompt;
+        async (systemPrompt?: string, isReconnect = false) => {
+            // Save for reconnection (only on first connect, not reconnects)
+            if (!isReconnect) {
+                lastSystemPromptRef.current = systemPrompt;
+                sessionStartRef.current = new Date().toISOString();
+            }
             intentionalCloseRef.current = false;
-            sessionStartRef.current = new Date().toISOString();
 
             const connectStart = performance.now();
 
@@ -351,6 +385,23 @@ export function useGeminiLiveSession() {
                 memoryParts.push(tokenData.vaultContext);
             }
 
+            // ══════ RECONNECT CONTEXT RECOVERY ══════
+            // When reconnecting after WS drop, inject accumulated transcript
+            // so Gemini can continue the conversation seamlessly
+            if (isReconnect && sessionTranscriptRef.current.length > 0) {
+                const recentLines = sessionTranscriptRef.current.slice(-20); // last 20 turns max
+                const reconnectBlock = [
+                    "\n══════ КОНТЕКСТ ПРЕРВАННОЙ СЕССИИ ══════",
+                    "Соединение было временно потеряно. Ниже — последние реплики ДО обрыва.",
+                    "Продолжай разговор естественно, как если бы ничего не произошло.",
+                    "",
+                    ...recentLines,
+                    "══════════════════════════════════════════",
+                ].join("\n");
+                memoryParts.push(reconnectBlock);
+                logger.info(`[GeminiLive] 🔄 Reconnect context injected: ${recentLines.length} turns`);
+            }
+
             const fullSystemPrompt = memoryParts.join("\n\n═══════════════════════════════════════════════\n\n");
 
             if (tokenData.contextSummary) {
@@ -422,7 +473,7 @@ export function useGeminiLiveSession() {
                     );
 
                     reconnectTimerRef.current = setTimeout(() => {
-                        connect(lastSystemPromptRef.current).catch((err) => {
+                        connect(lastSystemPromptRef.current, true /* isReconnect */).catch((err) => {
                             logger.error("[GeminiLive] Reconnect failed:", err);
                             if (retryCountRef.current >= MAX_RECONNECT_ATTEMPTS) {
                                 setIsReconnecting(false);
