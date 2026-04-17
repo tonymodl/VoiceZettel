@@ -24,6 +24,39 @@ let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_MS = 1000;
 
+// Session transcript accumulator for post-session memory pipeline
+let sessionTranscript: Array<{ role: string; text: string }> = [];
+let sessionStartTime = "";
+
+/** Fire-and-forget: save session data to memory pipeline */
+async function triggerSessionSave() {
+    if (sessionTranscript.length < 2) return;
+    try {
+        const res = await fetch("/api/session-summary", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                userId: "anonymous",
+                transcript: sessionTranscript,
+                sessionMeta: {
+                    sessionId: `gemini_legacy_${Date.now()}`,
+                    startedAt: sessionStartTime,
+                    endedAt: new Date().toISOString(),
+                    durationMs: Date.now() - new Date(sessionStartTime).getTime(),
+                },
+            }),
+        });
+        if (res.ok) {
+            logger.info(`[GeminiLive] ✅ Session saved (${sessionTranscript.length} turns)`);
+        } else {
+            logger.error(`[GeminiLive] Session save failed: ${res.status}`);
+        }
+    } catch (err) {
+        logger.error(`[GeminiLive] Session save error:`, err);
+    }
+    sessionTranscript = [];
+}
+
 interface GeminiLiveOptions {
     wsUrl: string;
     micStream: MediaStream;
@@ -652,6 +685,7 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
 
     let userTranscript = "";
     let assistantTranscript = "";
+    if (!sessionStartTime) sessionStartTime = new Date().toISOString();
 
     ws.onmessage = async (event: MessageEvent) => {
         const raw: string = event.data instanceof Blob
@@ -795,6 +829,9 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
             opts.onLog("turnComplete", { user: userTranscript, assistant: assistantTranscript });
             if (userTranscript || assistantTranscript) {
                 opts.onMessage(userTranscript, assistantTranscript);
+                // Accumulate for session save
+                if (userTranscript) sessionTranscript.push({ role: "user", text: userTranscript });
+                if (assistantTranscript) sessionTranscript.push({ role: "assistant", text: assistantTranscript });
             }
             userTranscript = "";
             assistantTranscript = "";
@@ -824,6 +861,8 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
         } else {
             reconnectAttempts = 0; // Reset for next session
             opts.onOrbState("idle");
+            // Save session on final close (not reconnect)
+            void triggerSessionSave();
         }
     };
 }
@@ -837,6 +876,8 @@ export function disconnectGeminiLive() {
         micStream.getTracks().forEach((t) => t.stop());
         micStream = null;
     }
+    // Save session data BEFORE closing WS
+    void triggerSessionSave();
     ws?.close();
     ws = null;
     stopPlayback();
@@ -845,6 +886,7 @@ export function disconnectGeminiLive() {
     }
     playbackCtx = null;
     isSpeaking = false;
+    sessionStartTime = "";
 }
 
 async function startMicFromStream(stream: MediaStream, opts: GeminiLiveOptions) {

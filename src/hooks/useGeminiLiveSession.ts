@@ -385,21 +385,43 @@ export function useGeminiLiveSession() {
                 memoryParts.push(tokenData.vaultContext);
             }
 
-            // ══════ RECONNECT CONTEXT RECOVERY ══════
+            // ══════ RECONNECT CONTEXT RECOVERY (with memory compaction) ══════
             // When reconnecting after WS drop, inject accumulated transcript
-            // so Gemini can continue the conversation seamlessly
+            // so Gemini can continue the conversation seamlessly.
+            // Memory compaction: if >30 turns, compress older ones into summary.
             if (isReconnect && sessionTranscriptRef.current.length > 0) {
-                const recentLines = sessionTranscriptRef.current.slice(-20); // last 20 turns max
+                const allLines = sessionTranscriptRef.current;
+                let contextLines: string[];
+                let compactedSummary = "";
+
+                if (allLines.length > 30) {
+                    // Memory compaction: summarize older turns, keep last 20 raw
+                    const olderLines = allLines.slice(0, -20);
+                    const recentLines = allLines.slice(-20);
+                    const topics = new Set<string>();
+                    for (const line of olderLines) {
+                        // Extract key words from each line for topic detection
+                        const text = line.replace(/^(USER|ASSISTANT): /, "");
+                        if (text.length > 20) topics.add(text.slice(0, 80) + "...");
+                    }
+                    compactedSummary = `[Сжатый контекст: ${olderLines.length} реплик ранее. Темы: ${Array.from(topics).slice(0, 5).join("; ")}]`;
+                    contextLines = recentLines;
+                } else {
+                    contextLines = allLines.slice(-20);
+                }
+
                 const reconnectBlock = [
                     "\n══════ КОНТЕКСТ ПРЕРВАННОЙ СЕССИИ ══════",
                     "Соединение было временно потеряно. Ниже — последние реплики ДО обрыва.",
                     "Продолжай разговор естественно, как если бы ничего не произошло.",
                     "",
-                    ...recentLines,
+                    ...(compactedSummary ? [compactedSummary, ""] : []),
+                    ...contextLines,
                     "══════════════════════════════════════════",
                 ].join("\n");
                 memoryParts.push(reconnectBlock);
-                logger.info(`[GeminiLive] 🔄 Reconnect context injected: ${recentLines.length} turns`);
+                logger.info(`[GeminiLive] 🔄 Reconnect context injected: ${contextLines.length} turns` +
+                    (compactedSummary ? ` (+ ${allLines.length - contextLines.length} compacted)` : ""));
             }
 
             const fullSystemPrompt = memoryParts.join("\n\n═══════════════════════════════════════════════\n\n");
@@ -485,9 +507,10 @@ export function useGeminiLiveSession() {
                     // Intentional disconnect — trigger session analytics
                     void triggerSessionAnalysis();
                 } else {
-                    // All retries exhausted
+                    // All retries exhausted — still save session data!
                     setIsReconnecting(false);
-                    logger.error("[GeminiLive] ❌ All reconnect attempts exhausted. Tap orb to restart.");
+                    logger.error("[GeminiLive] ❌ All reconnect attempts exhausted. Saving session data...");
+                    void triggerSessionAnalysis();
                 }
             };
         },
