@@ -195,6 +195,7 @@ export function TopCountersBar() {
         tokensUsd, tokensRub, tokensBalance,
         openaiBalanceUsd, openaiBalanceRub, openaiBalanceError,
         loadOpenAIBalance,
+        loadCountsFromServer,
     } = useCountersStore();
     const {
         showIdeasCounter,
@@ -207,6 +208,11 @@ export function TopCountersBar() {
         showOpenAIBalance,
         customWidgets,
     } = useSettingsStore();
+
+    // Load real counts from SQLite on mount
+    useEffect(() => {
+        void loadCountsFromServer("anonymous");
+    }, [loadCountsFromServer]);
 
     useEffect(() => {
         if (!showOpenAIBalance) return;

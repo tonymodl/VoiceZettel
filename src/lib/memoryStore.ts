@@ -126,6 +126,37 @@ export async function getMemoryCount(userId: string): Promise<number> {
 }
 
 /**
+ * Get memory counts grouped by category tags.
+ * Used by the main page TopCountersBar to show real counts from DB.
+ */
+export function getMemoryCountsByTag(userId: string): {
+    ideas: number;
+    facts: number;
+    persons: number;
+    tasks: number;
+    total: number;
+} {
+    const db = getDb();
+    const rows = db.prepare(
+        `SELECT tags FROM memories WHERE user_id = ?`,
+    ).all(userId) as Array<{ tags: string }>;
+
+    let ideas = 0, facts = 0, persons = 0, tasks = 0;
+    for (const row of rows) {
+        try {
+            const tags = JSON.parse(row.tags) as string[];
+            const lower = tags.map(t => t.toLowerCase());
+            if (lower.includes("idea")) ideas++;
+            if (lower.includes("fact")) facts++;
+            if (lower.includes("persona")) persons++;
+            if (lower.includes("task")) tasks++;
+        } catch { /* skip malformed tags */ }
+    }
+
+    return { ideas, facts, persons, tasks, total: rows.length };
+}
+
+/**
  * Delete a single memory by ID.
  */
 export async function deleteMemory(

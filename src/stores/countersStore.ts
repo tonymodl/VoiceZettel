@@ -27,6 +27,30 @@ export const useCountersStore = create<CountersState & CountersActions>()(
         addTokensUsed: (count) =>
             set((s) => ({ tokensBalance: s.tokensBalance + count })),
 
+        /** Load real category counts from SQLite via API */
+        loadCountsFromServer: async (userId: string) => {
+            try {
+                const res = await fetch(
+                    `/api/memory-counts?userId=${encodeURIComponent(userId)}`,
+                );
+                if (!res.ok) return;
+                const data = (await res.json()) as {
+                    ideas: number;
+                    facts: number;
+                    persons: number;
+                    tasks: number;
+                };
+                set({
+                    ideas: data.ideas,
+                    facts: data.facts,
+                    persons: data.persons,
+                    tasks: data.tasks,
+                });
+            } catch (err) {
+                logger.error("Failed to load memory counts:", (err as Error).message);
+            }
+        },
+
         loadTokensFromServer: async (userId: string) => {
             try {
                 const res = await fetch(

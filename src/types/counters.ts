@@ -29,6 +29,8 @@ export interface CountersActions {
     reportTokenUsage: (userId: string, model: string, textIn: number, textOut: number, audioIn?: number, audioOut?: number) => Promise<void>;
     /** Fetch real OpenAI account balance */
     loadOpenAIBalance: () => Promise<void>;
+    /** Load real category counts from server (SQLite) */
+    loadCountsFromServer: (userId: string) => Promise<void>;
 }
 
 // ── Custom Widget ───────────────────────────────────────────
