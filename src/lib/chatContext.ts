@@ -13,6 +13,8 @@ import { loadVaultContext, loadVaultNotes } from "@/lib/vaultContext";
 import { buildGoldenContextBlock } from "@/lib/goldenContext";
 import { logger } from "@/lib/logger";
 import { formatBangkokNow } from "@/lib/timezone";
+import * as fs from "fs";
+import { join } from "path";
 
 const INDEXER_URL = process.env.INDEXER_SERVICE_URL ?? "http://127.0.0.1:8030";
 
@@ -238,6 +240,21 @@ export interface EnrichPromptOptions {
  */
 export function buildEnrichedPrompt(opts: EnrichPromptOptions): string {
     let prompt = opts.systemPrompt;
+
+    // ═══ CUSTOM SYSTEM INSTRUCTIONS (Antigravity Memory Fix) ═══
+    // Read rigid instructions from the root of the Obsidian vault.
+    const vaultPath = process.env.VAULT_PATH || "";
+    if (vaultPath) {
+        try {
+            const instructionsPath = join(vaultPath, "_System_Instructions.md");
+            if (fs.existsSync(instructionsPath)) {
+                const customInstructions = fs.readFileSync(instructionsPath, "utf-8");
+                prompt += `\n\n### ЖЕСТКИЕ ПРАВИЛА ПОВЕДЕНИЯ (ВЫСШИЙ ПРИОРИТЕТ)\n${customInstructions}\n\n`;
+            }
+        } catch (e) {
+            logger.error("[chatContext] Failed to read _System_Instructions.md:", e);
+        }
+    }
 
     // ═══ DATE/TIME — UTC+7 ═══
     prompt += `\n\nТекущая дата и время: ${formatBangkokNow()}`;

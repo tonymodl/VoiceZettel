@@ -96,6 +96,7 @@ export async function startService(cwd: string, command: string, args: string[])
         detached: true,
         stdio: "ignore",
         shell: true,
+        windowsHide: true,
     });
     child.unref();
     // Give it time to start
