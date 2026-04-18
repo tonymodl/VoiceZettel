@@ -3,12 +3,12 @@
  * Lists people in Dunbar circles from ChromaDB/memory.
  * People are stored as memories tagged with "person" category.
  * Used by DunbarTab in admin panel.
- * Falls back to GOLDEN_CIRCLE when ChromaDB has no person data.
+ * Falls back to getGoldenCircle() when ChromaDB has no person data.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
-import { GOLDEN_CIRCLE, type GoldenPerson } from "@/lib/goldenContext";
+import { getGoldenCircle, type GoldenPerson } from "@/lib/goldenContext";
 
 const INDEXER_URL = process.env.INDEXER_SERVICE_URL ?? "http://127.0.0.1:8030";
 
@@ -52,7 +52,13 @@ export async function GET(req: NextRequest) {
     const userId = req.nextUrl.searchParams.get("userId") ?? "anonymous";
 
     // Start with golden circle as the guaranteed base
-    const goldenPeople = GOLDEN_CIRCLE.map(goldenToDunbar);
+    let goldenPeople: DunbarPerson[] = [];
+    try {
+        const gc = getGoldenCircle();
+        goldenPeople = gc.map(goldenToDunbar);
+    } catch (err) {
+        logger.error(`Error loading golden context: ${err}`);
+    }
 
     try {
         // Search ChromaDB for person memories

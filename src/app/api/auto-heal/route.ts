@@ -44,7 +44,7 @@ async function killPort(port: number): Promise<void> {
     try {
         // Windows: find PID using port and kill it
         const { stdout } = await execAsync(
-            `powershell -Command "Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"`,
+            `powershell -ExecutionPolicy Bypass -Command "Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"`,
             { timeout: 10000 }
         );
         void stdout;
@@ -60,6 +60,7 @@ async function startService(cwd: string, command: string, args: string[]): Promi
         detached: true,
         stdio: "ignore",
         shell: true,
+        windowsHide: true,
     });
     child.unref();
     // Give it time to start

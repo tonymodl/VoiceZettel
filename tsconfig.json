@@ -34,5 +34,5 @@
     "src/types/**/*.d.ts"
   ],
   "files": ["src/types/global.d.ts"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "_vz_ref"]
 }

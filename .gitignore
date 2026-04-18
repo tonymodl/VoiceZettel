@@ -105,3 +105,11 @@ chroma_data/
 bm25_data/
 *.db
 
+ 
+*.wav
+logs/
+*.log
+temp_*.py
+e2e_*.js
+fix_*.js
+sockets.txt

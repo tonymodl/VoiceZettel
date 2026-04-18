@@ -287,27 +287,16 @@ interface SlotPriorities {
  * Main allocation function. Builds the full ContextSummary with all 6 slots.
  */
 export function allocateContext(opts: AllocatorOptions): ContextSummary {
-    const { totalBudget, vaultNotes, chromaResults, userId } = opts;
+    const { totalBudget, chromaResults, userId } = opts;
 
-    // Budget distribution (chars) — use user priorities or defaults
-    // Defaults match architecture_voice_assistant.md Section 2
-    const p = opts.priorities ?? {
-        critical: 28, active: 14, predicted: 16, recent: 14, vault: 15, tools: 13,
-    };
-    const slotBudgets = {
-        critical: Math.floor(totalBudget * (p.critical / 100)),
-        active: Math.floor(totalBudget * (p.active / 100)),
-        predicted: Math.floor(totalBudget * (p.predicted / 100)),
-        recent: Math.floor(totalBudget * (p.recent / 100)),
-        vault: Math.floor(totalBudget * (p.vault / 100)),
-        tools: Math.floor(totalBudget * (p.tools / 100)),
-    };
+    // Define tools budget statically as reserved space
+    const TOOLS_MAX_CHARS = 10400;
 
-    // ── Slot 1: CRITICAL (golden context + remarks, requirements) ──
-    const critical = createEmptySlot("Замечания", "🔴", "#ff6b6b", slotBudgets.critical);
+    // ── Phase 1: CRITICAL (No strict limit, takes what it needs) ──
+    const critical = createEmptySlot("Замечания", "🔴", "#ff6b6b", totalBudget);
 
     // Golden Context (inner circle) — ALWAYS present, NEVER evicted
-    const goldenChars = getGoldenContextChars();
+    const goldenChars = getGoldenContextChars(userId);
     critical.items.push({
         id: "golden_context",
         text: "[Ближний круг — инжектирован в промпт через goldenContext.ts]",
@@ -319,30 +308,28 @@ export function allocateContext(opts: AllocatorOptions): ContextSummary {
     });
     critical.usedChars += goldenChars;
 
-    // User corrections/remarks (fill remaining critical budget)
+    // User corrections/remarks
     const criticalItems = loadCriticalMemories(userId);
     for (const item of criticalItems) {
-        if (critical.usedChars + item.chars > critical.maxChars) break;
+        if (critical.usedChars + item.chars > totalBudget) break;
         critical.items.push(item);
         critical.usedChars += item.chars;
     }
 
-    // ── Slot 2: ACTIVE (tasks, goals) ──
-    const active = createEmptySlot("Задачи и цели", "🟠", "#ffa94d", slotBudgets.active);
-    const activeItems = loadActiveMemories(userId);
-    for (const item of activeItems) {
-        if (active.usedChars + item.chars > active.maxChars) break;
-        active.items.push(item);
-        active.usedChars += item.chars;
-    }
+    // Set its actual maxChars to what it consumed so UI reflects 100% capacity used for its dedicated budget chunk
+    critical.maxChars = critical.usedChars > 0 ? critical.usedChars : 1; 
 
-    // ── Slot 3: PREDICTED (ChromaDB dynamic) ──
-    const predicted = createEmptySlot("Предсказано", "🟡", "#ffd43b", slotBudgets.predicted);
+    // ── Calculate Remaining Budget for Flex Allocation ──
+    let availableBudget = totalBudget - critical.usedChars - TOOLS_MAX_CHARS;
+    if (availableBudget < 0) availableBudget = 0;
+
+    // ── Phase 2: Gather candidate items for other slots ──
+    // Slot: PREDICTED
+    const predictedCandidates: ContextItem[] = [];
     for (const text of chromaResults) {
         const trimmed = text.slice(0, 500);
-        if (predicted.usedChars + trimmed.length > predicted.maxChars) break;
-        predicted.items.push({
-            id: `chroma_${predicted.items.length}`,
+        predictedCandidates.push({
+            id: `chroma_${predictedCandidates.length}`,
             text: trimmed,
             tags: ["predicted"],
             source: "chroma",
@@ -350,45 +337,69 @@ export function allocateContext(opts: AllocatorOptions): ContextSummary {
             createdAt: new Date().toISOString(),
             chars: trimmed.length,
         });
-        predicted.usedChars += trimmed.length;
     }
 
-    // ── Slot 4: RECENT (session summaries) ──
-    const recent = createEmptySlot("Свежее", "🔵", "#4dabf7", slotBudgets.recent);
-    const summaries = loadSessionSummaries(userId);
-    for (const item of summaries) {
-        if (recent.usedChars + item.chars > recent.maxChars) break;
-        recent.items.push(item);
-        recent.usedChars += item.chars;
+    // Slot: ACTIVE
+    const activeCandidates = loadActiveMemories(userId);
+
+    // Slot: RECENT
+    const recentCandidates = loadSessionSummaries(userId);
+
+    // ── Phase 3: Flex Waterfall Allocation ──
+    // Target base split: 50% Predicted, 25% Active, 25% Recent
+    let predictedTarget = Math.floor(availableBudget * 0.50);
+    let activeTarget = Math.floor(availableBudget * 0.25);
+    let recentTarget = Math.floor(availableBudget * 0.25);
+
+    // Helper to calculate total chars needed by candidate array
+    const calcNeeded = (candidates: ContextItem[]) => candidates.reduce((sum, item) => sum + item.chars, 0);
+
+    const predictedNeeded = calcNeeded(predictedCandidates);
+    const activeNeeded = calcNeeded(activeCandidates);
+    const recentNeeded = calcNeeded(recentCandidates);
+
+    // Waterfall spill-over: If a slot needs less than its target, shift remainder to others
+    if (activeNeeded < activeTarget) {
+        const excess = activeTarget - activeNeeded;
+        activeTarget = activeNeeded;
+        predictedTarget += Math.floor(excess * 0.7);
+        recentTarget += Math.floor(excess * 0.3);
+    }
+    if (recentNeeded < recentTarget) {
+        const excess = recentTarget - recentNeeded;
+        recentTarget = recentNeeded;
+        predictedTarget += excess;
+    }
+    if (predictedNeeded < predictedTarget) {
+        const excess = predictedTarget - predictedNeeded;
+        predictedTarget = predictedNeeded;
+        activeTarget += excess; // Or whatever is next priority
     }
 
-    // ── Slot 5: VAULT (Zettelkasten) ──
-    const vault = createEmptySlot("Vault заметки", "⚪", "#e9ecef", slotBudgets.vault);
-    if (vaultNotes.length > 0) {
-        const trimmedVault = vaultNotes.slice(0, vault.maxChars);
-        vault.items.push({
-            id: "vault_condensed",
-            text: trimmedVault,
-            tags: ["vault"],
-            source: "vault",
-            score: 0.3,
-            createdAt: new Date().toISOString(),
-            chars: trimmedVault.length,
-        });
-        vault.usedChars = trimmedVault.length;
-    }
+    // ── Phase 4: Fill Slots ──
+    const fillSlot = (name: string, emoji: string, color: string, maxChars: number, candidates: ContextItem[]) => {
+        const slot = createEmptySlot(name, emoji, color, maxChars);
+        for (const item of candidates) {
+            if (slot.usedChars + item.chars > slot.maxChars) continue; // Try to fit smaller ones if big one fails
+            slot.items.push(item);
+            slot.usedChars += item.chars;
+        }
+        return slot;
+    };
 
-    // ── Slot 6: TOOLS (auto-calculated, not filled here) ──
-    const tools = createEmptySlot("Инструменты", "🟣", "#c084fc", slotBudgets.tools);
-    // Tool declarations are added by buildTools() separately — we just report estimated size
+    const predicted = fillSlot("Предсказано", "🟡", "#ffd43b", predictedTarget, predictedCandidates);
+    const active = fillSlot("Задачи и цели", "🟠", "#ffa94d", activeTarget, activeCandidates);
+    const recent = fillSlot("Свежее", "🔵", "#4dabf7", recentTarget, recentCandidates);
+
+    // Vault zeroed out as per user philosophy (Vault represents a tool now)
+    const vault = createEmptySlot("Vault заметки", "⚪", "#e9ecef", 0);
+    const tools = createEmptySlot("Инструменты", "🟣", "#c084fc", TOOLS_MAX_CHARS);
 
     // ── Build combined context text ──
     const parts: string[] = [];
 
     if (critical.items.length > 0) {
-        parts.push(
-            "\n⚠️ ОБЯЗАТЕЛЬНЫЕ ЗАМЕЧАНИЯ ВЛАДЕЛЬЦА (нарушение = ошибка):",
-        );
+        parts.push("\n⚠️ ОБЯЗАТЕЛЬНЫЕ ЗАМЕЧАНИЯ ВЛАДЕЛЬЦА (нарушение = ошибка):");
         for (const item of critical.items) {
             parts.push(`• ${item.text}`);
         }
@@ -409,31 +420,21 @@ export function allocateContext(opts: AllocatorOptions): ContextSummary {
     }
 
     if (predicted.items.length > 0) {
-        parts.push(
-            '\nДАННЫЕ ИЗ ХРАНИЛИЩ ("Антон Евсин" или "Антон" = ВЛАДЕЛЕЦ, остальные имена = его собеседники):',
-        );
+        parts.push('\nДАННЫЕ ИЗ ХРАНИЛИЩ ("Антон Евсин" или "Антон" = ВЛАДЕЛЕЦ, остальные имена = его собеседники):');
         for (const item of predicted.items) {
             parts.push(item.text);
         }
     }
 
-    if (vault.usedChars > 0) {
-        parts.push("\n📚 ЗАМЕТКИ ZETTELKASTEN:");
-        parts.push(vaultNotes.slice(0, vault.maxChars));
-    }
-
     const contextText = parts.join("\n");
 
-    // Estimate total tokens (rough: 1 token ≈ 2.5 Russian chars)
     const BASE_PROMPT_CHARS = 6500;
-    const TOOL_DECL_CHARS = 4000;
-    const GOLDEN_CONTEXT_CHARS = goldenChars; // Already in critical slot, counted once
-    const totalChars = BASE_PROMPT_CHARS + TOOL_DECL_CHARS + GOLDEN_CONTEXT_CHARS + contextText.length;
+    const totalChars = BASE_PROMPT_CHARS + TOOLS_MAX_CHARS + goldenChars + contextText.length;
     const totalTokens = Math.ceil(totalChars / 2.5);
     const maxTokens = 128000;
 
     logger.info(
-        `[ContextManager] Allocated: critical=${critical.usedChars}, active=${active.usedChars}, predicted=${predicted.usedChars}, recent=${recent.usedChars}, vault=${vault.usedChars}, total=${totalChars}ch (~${totalTokens}t)`,
+        `[ContextManager] Allocated: critical=${critical.usedChars}, active=${active.usedChars}, predicted=${predicted.usedChars}, recent=${recent.usedChars}, total=${totalChars}ch (~${totalTokens}t)`,
     );
 
     return {

@@ -222,7 +222,8 @@ export async function POST(req: NextRequest) {
             try {
                 const fs = await import("fs");
                 const path = await import("path");
-                const { GOLDEN_CIRCLE } = await import("@/lib/goldenContext");
+                const { getGoldenCircle } = await import("@/lib/goldenContext");
+                const gc = getGoldenCircle();
                 
                 const vaultPath = process.env.OBSIDIAN_VAULT_PATH 
                     ?? path.join(process.cwd(), "VoiceZettel");
@@ -235,7 +236,7 @@ export async function POST(req: NextRequest) {
                 const freshChats: string[] = [];
                 
                 // Read files for each inner circle person (circle 1 & 2)
-                for (const person of GOLDEN_CIRCLE.filter(p => p.circle <= 2)) {
+                for (const person of gc.filter((p: any) => p.circle <= 2)) {
                     // Fuzzy-match person to Telegram folder names using aliases
                     let folderNames: string[] = [];
                     try {

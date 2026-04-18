@@ -91,15 +91,19 @@ def _extract_links(message) -> Optional[list[dict]]:
 
 def message_to_dict(message) -> dict:
     """Convert a Telethon Message to a serializable dict."""
-    msg_type = "service" if message.action else "message"
+    msg_type = "service" if getattr(message, "action", None) else "message"
     sender = None
     username = None
-    if message.sender:
+    
+    # Explicitly distinguish the user's outgoing messages
+    if getattr(message, "out", False):
+        sender = "Я (Антон)"
+    elif getattr(message, "sender", None):
         sender = get_display_name(message.sender)
         username = getattr(message.sender, "username", None)
 
     raw_text = getattr(message, "raw_text", None)
-    msg_text = raw_text if raw_text is not None else message.message
+    msg_text = raw_text if raw_text is not None else getattr(message, "message", "")
 
     msg = {
         "id": message.id,
@@ -223,7 +227,52 @@ class TelegramExporter:
         self._client = TelegramClient(session_file, api_id, api_hash)
         await self._client.connect()
         logger.info("Connected to Telegram")
+        
+        # Start the heartbeat loop asynchronously to ensure self-healing
+        if self._client.is_connected():
+            asyncio.create_task(self.heartbeat_loop())
+            
         return True
+
+    async def reconnect_with_backoff(self, max_retries: int = 12):
+        """Переподключение с экспоненциальной задержкой"""
+        if not self._client:
+            return
+            
+        for attempt in range(1, max_retries + 1):
+            delay = min(0.3 * (1.5 ** (attempt - 1)), 30)
+            logger.info(f"Reconnect attempt {attempt}/{max_retries} in {delay:.1f}s")
+            await asyncio.sleep(delay)
+            try:
+                if self._client.is_connected():
+                    await self._client.disconnect()
+                await self._client.connect()
+                if await self._client.is_user_authorized():
+                    logger.info("Reconnected successfully!")
+                    return
+            except Exception as e:
+                logger.error(f"Reconnect failed: {e}")
+                
+        logger.critical("Max reconnect attempts exhausted!")
+
+    async def heartbeat_loop(self, interval: int = 120):
+        """Каждые 2 минуты проверяем жизнеспособность соединения"""
+        logger.info(f"Heartbeat loop started (interval={interval}s)")
+        while self._client is not None:
+            try:
+                if not self._client.is_connected():
+                    raise ConnectionError("Client disconnected")
+                    
+                me = await asyncio.wait_for(self._client.get_me(), timeout=10)
+                if me:
+                    logger.debug(f"Heartbeat OK: @{me.username}")
+                else:
+                    raise ConnectionError("Failed to get_me")
+            except Exception as e:
+                logger.warning(f"Heartbeat FAIL: {e}, reconnecting...")
+                await self.reconnect_with_backoff()
+            
+            await asyncio.sleep(interval)
 
     async def send_code(self, phone: str) -> bool:
         """Send auth code to phone."""
@@ -250,6 +299,10 @@ class TelegramExporter:
             await self._client.sign_in(password=password)
 
         me = await self._client.get_me()
+        
+        # Start heartbeat loop if not already started
+        asyncio.create_task(self.heartbeat_loop())
+        
         return {
             "status": "authorized",
             "user": {

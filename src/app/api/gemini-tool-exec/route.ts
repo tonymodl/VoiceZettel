@@ -651,6 +651,29 @@ export async function POST(req: NextRequest) {
                 break;
             }
 
+            case "consult_openai_engine": {
+                const query = String(args.query ?? "");
+                try {
+                    // Proxies the request to the new OpenAI Brain route
+                    const baseUrl = req.nextUrl.origin;
+                    const res = await fetch(`${baseUrl}/api/openai-brain`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ query, userId }),
+                        signal: AbortSignal.timeout(60000), // OpenAI can take a while with tools
+                    });
+                    const data = await res.json();
+                    if (res.ok) {
+                        result = { success: true, message: data.result };
+                    } else {
+                        result = { error: data.error || "Ошибка OpenAI API" };
+                    }
+                } catch (err) {
+                    result = { error: `OpenAI Bridge error: ${err instanceof Error ? err.message : String(err)}` };
+                }
+                break;
+            }
+
             default:
                 result = { error: `Unknown tool: ${tool}` };
         }

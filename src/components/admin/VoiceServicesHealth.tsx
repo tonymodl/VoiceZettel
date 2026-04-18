@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
     Radio, Brain, Mic, Volume2, FileText, Heart,
     Shield, RefreshCw, Loader2, Wrench, CheckCircle2,
-    XCircle, AlertTriangle, Clock,
+    XCircle, AlertTriangle, Clock, Database,
 } from "lucide-react";
 
 /* ── Types ── */
@@ -207,6 +207,52 @@ export function VoiceServicesHealth() {
             status: "ok",
             detail: "Включён (3 попытки, backoff 1с→2с→4с)",
         });
+
+        // 8. ChromaDB Context
+        try {
+            const res = await fetch("/api/indexer/health", { signal: AbortSignal.timeout(4000) });
+            if (res.ok) {
+                const data = await res.json() as { chroma_documents: number; embedder_enabled: boolean };
+                if (data.chroma_documents > 5000) {
+                    results.push({
+                        id: "chroma",
+                        nameRu: "Контекст (ChromaDB)",
+                        icon: <Database className="size-4 text-emerald-400" />,
+                        status: "ok",
+                        detail: `${data.chroma_documents.toLocaleString()} чанков (100% базы) | Векторизация: ${data.embedder_enabled ? "Вкл" : "Выкл"}`,
+                    });
+                } else if (data.chroma_documents > 0) {
+                    results.push({
+                        id: "chroma",
+                        nameRu: "Контекст (ChromaDB)",
+                        icon: <Database className="size-4 text-amber-400" />,
+                        status: "degraded",
+                        detail: `${data.chroma_documents.toLocaleString()} чанков — Неполная база! Идёт сбор или ошибка. Ожидается около 16000.`,
+                         healAction: "Запустить индексацию",
+                    });
+                } else {
+                    results.push({
+                        id: "chroma",
+                        nameRu: "Контекст (ChromaDB)",
+                        icon: <Database className="size-4 text-red-500" />,
+                        status: "error",
+                        detail: "Векторная база пуста (0 чанков)",
+                        healAction: "Запустить индексацию",
+                    });
+                }
+            } else {
+                throw new Error("HTTP " + res.status);
+            }
+        } catch {
+            results.push({
+                id: "chroma",
+                nameRu: "Контекст (ChromaDB)",
+                icon: <Database className="size-4 text-red-400" />,
+                status: "error",
+                detail: "Сервис памяти не отвечает (порт 8030)",
+                healAction: "Перезапустить службу",
+            });
+        }
 
         setServices(results);
         setLastCheck(new Date());

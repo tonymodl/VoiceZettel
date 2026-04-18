@@ -1012,8 +1012,8 @@ export function TelegramTab() {
                                     );
 
                                     // Progress %
-                                    const pct = isExp && t?.exported_count && (t as Record<string, unknown>)?.total_messages && ((t as Record<string, unknown>).total_messages as number) > 0
-                                        ? Math.min(100, Math.round((t.exported_count / ((t as Record<string, unknown>).total_messages as number)) * 100)) : null;
+                                    const pct = isExp && t?.exported_count && (t as any)?.total_messages && ((t as any).total_messages as number) > 0
+                                        ? Math.min(100, Math.round((t.exported_count / ((t as any).total_messages as number)) * 100)) : null;
 
                                     return (
                                         <div key={item.id}

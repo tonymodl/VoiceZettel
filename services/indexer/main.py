@@ -89,10 +89,18 @@ def _get_chroma_collection():
         logger.info(f"Connected to ChromaDB at {CHROMA_HOST}:{CHROMA_PORT}")
     except Exception:
         # Fallback to persistent local client
-        # CRITICAL: Store OUTSIDE OneDrive — sync corrupts HNSW index during writes
+        from chromadb.config import Settings
+        
         chroma_dir = os.path.join(os.path.expanduser("~"), ".voicezettel", "chroma_data")
         os.makedirs(chroma_dir, exist_ok=True)
-        client = chromadb.PersistentClient(path=chroma_dir)
+        # Add robust threading / lock timeout settings if using standard sqlite3
+        client = chromadb.PersistentClient(
+            path=chroma_dir,
+            settings=Settings(
+                anonymized_telemetry=False,
+                allow_reset=True,
+            )
+        )
         logger.info(f"Using local ChromaDB at {chroma_dir}")
 
     collection = client.get_or_create_collection(
@@ -123,7 +131,7 @@ async def _index_batch(docs_batch, col, source_label: str = ""):
     # Upsert to ChromaDB in sub-batches of 50 (HNSW crashes with large upserts)
     SUB_BATCH = 50
     for j in range(0, len(ids), SUB_BATCH):
-        for attempt in range(3):  # retry up to 3 times
+        for attempt in range(5):  # retry up to 5 times for SQLite locks
             try:
                 col.upsert(
                     ids=ids[j:j+SUB_BATCH],
@@ -133,11 +141,13 @@ async def _index_batch(docs_batch, col, source_label: str = ""):
                 )
                 break
             except Exception as e:
-                if attempt < 2:
+                import traceback
+                if attempt < 4:
                     logger.warning(f"ChromaDB upsert retry {attempt+1}: {e}")
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(1.5 * (attempt + 1))
                 else:
-                    raise
+                    logger.error(f"Batch upsert failed completely after 5 retries. Skipping batch. Error: {e}")
+                    logger.debug(f"Traceback: {traceback.format_exc()}")
 
     # BM25 sync (fire-and-forget)
     try:
@@ -370,7 +380,7 @@ async def index_file(req: IndexFileRequest):
     if not docs:
         return {"status": "skipped", "reason": "File too short or not .md"}
 
-    upserted = await _index_documents(docs, "single")
+    upserted = await _index_documents_streaming(docs, "single")
     return {"status": "ok", "chunks": upserted, "file": req.file_path}
 
 

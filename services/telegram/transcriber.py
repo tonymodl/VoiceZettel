@@ -122,11 +122,20 @@ class Transcriber:
         tmp_path = os.path.join(tmp_dir, f"voice_{message.id}.ogg")
 
         try:
-            await client.download_media(message, file=tmp_path)
+            import io
+            import asyncio
+            audio_bytes = await asyncio.to_thread(lambda: io.BytesIO())
+            await client.download_media(message, file=audio_bytes)
             
-            if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
+            if not audio_bytes.getbuffer().nbytes:
                 logger.warning(f"Downloaded voice file is empty: msg {message.id}")
                 return None
+
+            def write_temp():
+                with open(tmp_path, "wb") as f:
+                    f.write(audio_bytes.getvalue())
+                    
+            await asyncio.to_thread(write_temp)
 
             # Transcribe
             text = await self.transcribe_file(tmp_path)

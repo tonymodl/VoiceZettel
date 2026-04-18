@@ -62,6 +62,19 @@ export async function saveMemory(
 
     logger.debug(`Memory [${userId}]: saved "${text.slice(0, 50)}..." [${tags.join(", ")}]`);
 
+    // SUPER SESSION TRIGGER: Immediate empathy profile evolution if it's a correction or angry remark
+    const isCorrection = tags.some(t => t.toLowerCase() === "correction" || t.toLowerCase() === "rule" || t.toLowerCase() === "complaint");
+    const hasAngryWords = /бесишь|халтура|забыл|врёшь|вранье|исправь|переделай|надоело|ошибка/i.test(text);
+
+    if (isCorrection || hasAngryWords) {
+        logger.warn(`🤬 MemoryStore: Detected frustration/correction! Triggering IMMEDIATE profile evolution.`);
+        // Note: It's an async operation, we don't await so we don't block the memory response
+        import("@/lib/empathyEngine").then(module => {
+            module.evolveEmpathyProfile(userId)
+                .catch(err => logger.error(`Immediate profile evolution failed: ${err}`));
+        });
+    }
+
     return { id, text, tags, createdAt, embedding };
 }
 

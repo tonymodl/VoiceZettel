@@ -16,7 +16,7 @@ describe('Service Health Endpoints (Unit)', () => {
   it('/api/health returns valid JSON with expected shape', async () => {
     const { GET } = await import('@/app/api/health/route');
     const request = new Request('http://localhost:3000/api/health');
-    const response = await GET(request);
+    const response = await GET();
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data).toHaveProperty('status');

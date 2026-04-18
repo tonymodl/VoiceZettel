@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { loadEmpathyProfile, evolveEmpathyProfile } from "@/lib/empathyEngine";
+import { loadEmpathyProfile, evolveEmpathyProfile, saveEmpathyProfile } from "@/lib/empathyEngine";
 
 export async function GET(req: NextRequest) {
     const userId = req.nextUrl.searchParams.get("userId") ?? "anonymous";
@@ -44,4 +44,23 @@ export async function POST(req: NextRequest) {
         rulesCount: profile.evolvedRules.length,
         automationsCount: profile.automationOpportunities.length,
     });
+}
+
+/**
+ * PUT /api/empathy-profile
+ * Manually update the empathy profile.
+ */
+export async function PUT(req: NextRequest) {
+    try {
+        const { userId, profile } = await req.json();
+        if (!profile) {
+            return NextResponse.json({ error: "Missing profile" }, { status: 400 });
+        }
+        
+        saveEmpathyProfile(userId ?? "anonymous", profile);
+        
+        return NextResponse.json({ success: true, profile });
+    } catch (err) {
+        return NextResponse.json({ error: String(err) }, { status: 500 });
+    }
 }

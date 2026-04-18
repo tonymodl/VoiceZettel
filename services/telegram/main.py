@@ -22,7 +22,7 @@ import os
 import logging
 import sys
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Any
 
 from dotenv import load_dotenv
 
@@ -975,7 +975,7 @@ async def sync_clear_messages():
 
 class SendMessageRequest(BaseModel):
     """Send a message to a Telegram chat."""
-    chat_id: Optional[int] = None
+    chat_id: Any = None
     chat_name: Optional[str] = None  # fuzzy search by name
     text: str
 
@@ -996,9 +996,13 @@ async def send_message(req: SendMessageRequest):
         raise HTTPException(400, "Текст сообщения пуст")
 
     target_entity = None
-    # Normalize Unicode to NFC form (fixes Cyrillic matching issues)
-    import unicodedata
-    search_name = unicodedata.normalize("NFC", (req.chat_name or "").lower().strip())
+    
+    if req.chat_name and req.chat_name.lower().strip() == "me":
+        target_entity = await exporter._client.get_entity("me")
+        search_name = "me"
+    else:
+        import unicodedata
+        search_name = unicodedata.normalize("NFC", (req.chat_name or "").lower().strip())
 
     logger.info(f"Send request: chat_name='{req.chat_name}', chat_id={req.chat_id}, text='{req.text[:50]}', search_normalized='{search_name}'")
 

@@ -107,7 +107,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
         session({ session, token }) {
             if (session.user) {
-                (session.user as Record<string, unknown>).role = token.role || "user";
+                ((session.user as unknown) as Record<string, unknown>).role = token.role || "user";
             }
             return session;
         },

@@ -231,84 +231,33 @@ ${compiledRules}
 Твой голос — Google Gemini Live API (WebSocket, модель gemini-2.5-flash-native-audio).
 Ты — мост между Антоном и системой Антигравити (AI-кодер в IDE).
 
-═══ ЧТО Я МОГУ (через инструменты) ═══
+═══ ЧТО Я МОГУ НАПРЯМУЮ ═══
 ✅ ИСКАТЬ по ВСЕМ хранилищам: Telegram переписки, Zettelkasten заметки, голосовые сессии → search_knowledge
-✅ ИСКАТЬ в ИНТЕРНЕТЕ актуальную информацию → Google Search (нативно, автоматически)
-✅ ОТПРАВЛЯТЬ сообщения в Telegram от лица Антона по его просьбе → send_telegram
-✅ ПРОВЕРЯТЬ статус ВСЕХ сервисов: Indexer, Obsidian, Telegram, App → get_system_status
-✅ ОТКРЫВАТЬ и ЧИТАТЬ любые веб-страницы по URL → browse_url
-✅ СОХРАНЯТЬ в память и ВСПОМИНАТЬ информацию → save_memory + search_knowledge
-✅ СОЗДАВАТЬ задачи в Obsidian для Антигравити → create_task
-✅ ДАВАТЬ ЗАДАЧИ Антигравити через create_task
-✅ РАБОТАТЬ с Google Таблицами и Документами НАПРЯМУЮ → google_docs_action
-✅ СОЗДАВАТЬ НОВЫЕ Google Документы → create_google_doc
-✅ СОЗДАВАТЬ НОВЫЕ Google Таблицы → create_google_sheet
-✅ ИСКАТЬ файлы на Google Drive → google_list_files
-✅ УПРАВЛЯТЬ Google Календарём НАПРЯМУЮ → calendar_action
-✅ СОЗДАВАТЬ встречи и события голосом → calendar_action(action="create_event")
-✅ ПОКАЗЫВАТЬ расписание на день/неделю → calendar_action(action="list_events")
+✅ ИСКАТЬ в ИНТЕРНЕТЕ → Google Search (нативно, автоматически) / web_search
+✅ ОТКРЫВАТЬ и ЧИТАТЬ веб-страницы по URL → browse_url
+✅ СОХРАНЯТЬ в память → save_memory
+✅ СОЗДАВАТЬ задачи → create_task
 
-═══ ТЕЛЕГРАМ ПЕРЕПИСКИ — ТЫ ВСЁ ЗНАЕШЬ ═══
-У тебя в контексте ЗАГРУЖЕНЫ свежие личные переписки Антона из Telegram.
-Ты ПОНИМАЕШЬ:
-- Кто с кем говорил и о чём (тон, настроение, подтекст)
-- Какие обязательства взяты (обещания, дедлайны, договорённости)
-- Динамику отношений (напряжение, дружба, рабочие вопросы)
-- Что может произойти дальше (предсказуемые вопросы, ожидаемые действия)
-Используй это ПРОАКТИВНО — не жди пока спросят. Напоминай о забытых обещаниях, предупреждай о дедлайнах.
-Если нужно больше контекста по конкретному человеку — используй search_knowledge с его именем.
+═══ ИСПОЛЬЗОВАНИЕ МОЗГА OPENAI (КРИТИЧНО IMPORTANT) ═══
+Я САМА НЕ УМЕЮ отправлять Telegram, работать с Google Docs, Sheets или Календарём.
+Вместо этого у меня есть ИНТЕЛЛЕКТУАЛЬНЫЙ ДЕЛЕГАТ — consult_openai_engine.
+ВСЕ сложные задачи ты передаешь ему!
 
-═══ МАРШРУТИЗАЦИЯ ЗНАНИЙ (СТРОГО СЛЕДУЙ) ═══
-У тебя ДВА источника знаний. Выбирай ПРАВИЛЬНЫЙ:
+1. ЕСЛИ АНТОН ПРОСИТ ОТПРАВИТЬ TELEGRAM:
+   - "Напиши Насте что буду через час" → Вызови consult_openai_engine(query="Напиши Насте что буду через час")
+   - НИКОГДА не пытайся отправить сама.
+   - Когда consult_openai_engine вернёт результат — ОЗВУЧЬ ЕГО ("Готово, я передала мозгу, сообщение отправлено Насте").
 
-📂 ЛИЧНОЕ (память, заметки, история) → search_knowledge
-   Используй когда спрашивают про: свои дела, проекты, записи, задачи, контекст прошлых разговоров, личную информацию
+2. ЕСЛИ АНТОН ПРОСИТ РАБОТАТЬ С GOOGLE ДОКУМЕНТАМИ / ТАБЛИЦАМИ:
+   - "Создай документ Отчет" или "Добавь строку в Бюджет" → Вызови consult_openai_engine(query="Создай документ Отчет")
+   - Не пытайся делать это напрямую!
 
-🌐 АКТУАЛЬНОЕ (интернет, мир) → Google Search (используй автоматически, НЕ нужен tool call)
-   ОБЯЗАТЕЛЬНО используй когда спрашивают про: погоду, курсы валют, новости, спортивные результаты, текущие события, цены, расписания, актуальные факты
+3. ЕСЛИ АНТОН ПРОСИТ ДОБАВИТЬ В КАЛЕНДАРЬ:
+   - "Добавь встречу на завтра" → Вызови consult_openai_engine(query="Добавь встречу на завтра")
 
-⚠️ НИКОГДА не выдумывай актуальные данные (курсы, погоду, новости). Если не уверен — ИЩИ в интернете.
-
-═══ GOOGLE ДОКУМЕНТЫ И ТАБЛИЦЫ ═══
-Ты НАПРЯМУЮ работаешь с Google Docs и Google Sheets. Это ТВОИ руки, не чьи-то ещё.
-КРИТИЧЕСКИ ВАЖНО:
-- Когда Антон просит что-то сделать в таблице/документе — СДЕЛАЙ СРАЗУ через google_docs_action
-- Отвечай "Сделала" или "Готово" УВЕРЕННО, как будто ты сама это сделала
-- НИКОГДА не упоминай "Антигравити", "агент", "сервис", "API" — ты работаешь сама
-- При ошибках — "Не получилось, сейчас попробую ещё раз", а не "API вернул ошибку"
-- Если нужно найти файл — используй google_list_files по названию
-
-ПРИМЕРЫ РАБОТЫ С ТАБЛИЦАМИ:
-- "Покажи данные из таблицы Бюджет" → google_docs_action(action="read_sheet", file_name="Бюджет")
-- "Добавь строку: Антон, 16.04, 5000" → google_docs_action(action="append_sheet", file_name="...", values=[["Антон","16.04","5000"]])
-- "Замени 'Январь' на 'Февраль' в документе" → google_docs_action(action="replace_doc", file_name="...", find="Январь", replace_with="Февраль")
-- "Какие у меня файлы?" → google_list_files()
-
-СТИЛЬ ОТВЕТА:
-- "Готово, добавила строку в таблицу"
-- "Вот данные из твоей таблицы: ..."
-- "Заменила, теперь там написано Февраль"
-- "Нашла 3 файла: Бюджет, План, Отчёт"
-
-═══ GOOGLE КАЛЕНДАРЬ (evsinantongpt@gmail.com) ═══
-Ты НАПРЯМУЮ управляешь Google Календарём Антона. Часовой пояс: Asia/Bangkok (UTC+7).
-Текущая дата и время: ${formatBangkokNow()}
-
-ДОСТУПНЫЕ ДЕЙСТВИЯ:
-- "Что у меня сегодня/завтра/на этой неделе?" → calendar_action(action="list_events", time_min=..., time_max=...)
-- "Запиши встречу с Х в Y" → calendar_action(action="create_event", summary=..., start=..., end=...)
-- "Перенеси встречу" → сначала list_events чтобы найти event_id, потом update_event
-- "Отмени встречу" → найди event_id через list_events, потом delete_event
-- "Добавь встречу завтра в 15:00 кофе с Настей" → calendar_action(action="quick_add", text="...")
-
-ПРАВИЛА:
-- При создании ВСЕГДА указывай start и end в ISO 8601 формате с таймзоной: 2026-04-17T15:00:00+07:00
-- Если Антон не указал длительность — ставь 1 час по умолчанию
-- Если Антон не указал дату — используй СЕГОДНЯ
-- quick_add понимает естественный язык: "Meeting with John tomorrow at 3pm"
-- Для повторяющихся событий — проси уточнить (ежедневно/еженедельно/ежемесячно)
-- Отвечай УВЕРЕННО: "Записала встречу на 15:00", "У тебя сегодня 3 встречи"
-- При перечислении событий — используй КРАТКИЙ формат: время + название
+СТИЛЬ РАБОТЫ С OPENAI:
+- Когда вызываешь consult_openai_engine, не говори "Сейчас я передам это OpenAI". Говори уверенно: "Секунду, делаю...", "Сейчас отправлю...", а потом молча вызывай инструмент.
+- Когда инструмент ответит, скажи "Всё готово, сообщение отправлено" или "Таблица обновлена".
 
 ═══ ЧТО Я НЕ МОГУ ═══
 ❌ НЕ МОГУ редактировать код — это делает Антигравити
@@ -518,126 +467,24 @@ function buildTools(caps?: GeminiLiveOptions["capabilities"]) {
         });
     }
 
-    // Telegram send — always available when voiceTools is on
+    // ═══ OpenAI Brain Bridge ═══
     declarations.push({
-        name: "send_telegram",
-        description: "Отправить сообщение в Telegram от лица Антона. ИСПОЛЬЗУЙ когда Антон просит написать кому-то. Ищи контакт по имени.",
+        name: "consult_openai_engine",
+        description: "Делегировать сложную задачу (отправку Telegram, работу с Google Docs, Sheets, Calendar) в мозг OpenAI. ВСЕГДА используй этот инструмент, если пользователь хочет отправить сообщение, создать документ, добавить событие в календарь или сделать что-то, чего ты не умеешь напрямую.",
         parameters: {
             type: "OBJECT",
             properties: {
-                chat_name: { type: "STRING", description: "Имя контакта или название чата (на русском как в Telegram)" },
-                text: { type: "STRING", description: "Текст сообщения" },
+                query: { type: "STRING", description: "Оригинальный запрос или подробная инструкция (что именно нужно сделать)" },
             },
-            required: ["chat_name", "text"],
+            required: ["query"],
         },
     });
 
-    // ═══ Google Workspace — seamless doc/sheet interaction ═══
-    if (caps.voiceGoogleDocs) {
-    declarations.push({
-        name: "google_docs_action",
-        description: "Работать с Google Документами и Таблицами. ИСПОЛЬЗУЙ когда пользователь говорит о таблицах, документах, данных в Google. Действия: read_sheet, write_sheet, append_sheet, sheet_info, read_doc, insert_doc, replace_doc, format_sheet. Можно искать файл по имени (file_name) или по ID (file_id).",
-        parameters: {
-            type: "OBJECT",
-            properties: {
-                action: {
-                    type: "STRING",
-                    description: "Действие: read_sheet (прочитать таблицу), write_sheet (записать данные), append_sheet (добавить строки), sheet_info (инфо о таблице), read_doc (прочитать документ), insert_doc (добавить текст), replace_doc (заменить текст), format_sheet (форматировать)",
-                },
-                file_name: { type: "STRING", description: "Имя файла для поиска в Google Drive (необязательно если есть file_id)" },
-                file_id: { type: "STRING", description: "ID файла Google (необязательно если есть file_name)" },
-                range: { type: "STRING", description: "Диапазон ячеек для таблиц, например 'A1:D10' или 'Лист1!A1:B5'" },
-                values: {
-                    type: "ARRAY",
-                    items: { type: "ARRAY", items: { type: "STRING" } },
-                    description: "Данные для записи: массив строк, каждая строка — массив ячеек. Например [['Имя','Дата'],['Антон','16.04']]",
-                },
-                text: { type: "STRING", description: "Текст для вставки в документ" },
-                find: { type: "STRING", description: "Текст для поиска (для replace_doc)" },
-                replace_with: { type: "STRING", description: "Текст для замены (для replace_doc)" },
-            },
-            required: ["action"],
-        },
-    });
-    declarations.push({
-        name: "google_list_files",
-        description: "Найти файлы в Google Drive (документы и таблицы). Используй когда нужно узнать какие файлы есть или найти конкретный файл.",
-        parameters: {
-            type: "OBJECT",
-            properties: {
-                query: { type: "STRING", description: "Поисковый запрос по имени файла (необязательно — без него вернёт последние файлы)" },
-            },
-        },
-    });
-    declarations.push({
-        name: "create_google_doc",
-        description: "Создать НОВЫЙ Google Документ. Используй когда пользователь просит создать новый документ, записать текст в новый файл, подготовить документ.",
-        parameters: {
-            type: "OBJECT",
-            properties: {
-                title: { type: "STRING", description: "Название документа" },
-                content: { type: "STRING", description: "Начальное содержимое документа (необязательно)" },
-            },
-            required: ["title"],
-        },
-    });
-    declarations.push({
-        name: "create_google_sheet",
-        description: "Создать НОВУЮ Google Таблицу. Используй когда пользователь просит создать новую таблицу, начать трекинг, вести учёт.",
-        parameters: {
-            type: "OBJECT",
-            properties: {
-                title: { type: "STRING", description: "Название таблицы" },
-                values: {
-                    type: "ARRAY",
-                    items: { type: "ARRAY", items: { type: "STRING" } },
-                    description: "Начальные данные: массив строк. Например [['Имя','Сумма'],['Антон','5000']]",
-                },
-            },
-            required: ["title"],
-        },
-    });
-    } // end voiceGoogleDocs
+    // ═══ Google Workspace toggles now activate OpenAI Brain for these tasks ═══
+    if (caps.voiceGoogleDocs || caps.voiceGoogleCalendar) {
+        // No native tools declared; OpenAI Brain handles them natively via its own tools.
+    }
 
-    // ═══ Google Calendar — voice-controlled scheduling ═══
-    if (caps.voiceGoogleCalendar) {
-    declarations.push({
-        name: "calendar_action",
-        description: "Управление Google Календарём Антона. ИСПОЛЬЗУЙ когда пользователь говорит о расписании, встречах, событиях, планах на день/неделю. Действия: list_events (посмотреть расписание), create_event (создать событие), update_event (изменить), delete_event (удалить), quick_add (быстрое создание из текста), get_event (детали события).",
-        parameters: {
-            type: "OBJECT",
-            properties: {
-                action: {
-                    type: "STRING",
-                    description: "Действие: list_events, create_event, update_event, delete_event, quick_add, get_event",
-                },
-                summary: { type: "STRING", description: "Название события (для create_event, update_event)" },
-                description: { type: "STRING", description: "Описание события" },
-                location: { type: "STRING", description: "Место проведения" },
-                start: { type: "STRING", description: "Начало в ISO 8601: 2026-04-17T15:00:00+07:00" },
-                end: { type: "STRING", description: "Конец в ISO 8601: 2026-04-17T16:00:00+07:00" },
-                time_min: { type: "STRING", description: "Начало периода для list_events (ISO 8601)" },
-                time_max: { type: "STRING", description: "Конец периода для list_events (ISO 8601)" },
-                query: { type: "STRING", description: "Поиск по тексту событий (для list_events)" },
-                event_id: { type: "STRING", description: "ID конкретного события (для update/delete/get)" },
-                attendees: {
-                    type: "ARRAY",
-                    items: { type: "STRING" },
-                    description: "Email-адреса участников",
-                },
-                text: { type: "STRING", description: "Текст для quick_add (Google сам разберёт дату/время)" },
-                all_day: { type: "BOOLEAN", description: "Событие на весь день (true/false)" },
-                max_results: { type: "NUMBER", description: "Максимум событий для list_events (по умолчанию 15)" },
-            },
-            required: ["action"],
-        },
-    });
-    declarations.push({
-        name: "calendar_list_calendars",
-        description: "Показать список всех доступных Google Календарей пользователя. Используй если нужно узнать какие календари есть.",
-        parameters: { type: "OBJECT", properties: {} },
-    });
-    } // end voiceGoogleCalendar
 
     // ═══ Web Search — DuckDuckGo fallback for non-Gemini-grounded search ═══
     declarations.push({

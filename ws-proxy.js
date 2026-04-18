@@ -5,7 +5,7 @@ const GOOGLE_GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY;
 const GEMINI_LIVE_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-2.5-flash-native-audio-latest";
 const PORT = process.env.GEMINI_PROXY_PORT || 3099;
 
-const GEMINI_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GOOGLE_GEMINI_API_KEY}`;
+const GEMINI_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${GOOGLE_GEMINI_API_KEY}`;
 
 const wss = new WebSocketServer({ port: PORT });
 
@@ -28,8 +28,11 @@ wss.on("connection", (clientWs) => {
   });
 
   geminiWs.on("message", (data) => {
-    const preview = data.toString().slice(0, 300);
-    console.log("[Proxy] Gemini → Client:", preview);
+    const str = data.toString();
+    if (str.includes('"setupComplete"') || str.includes('"serverContent"')) {
+        const preview = str.slice(0, 300);
+        console.log("[Proxy] Gemini → Client:", preview);
+    }
     if (clientWs.readyState === WebSocket.OPEN) clientWs.send(data);
   });
 
@@ -45,8 +48,10 @@ wss.on("connection", (clientWs) => {
 
   clientWs.on("message", (data) => {
     const str = data.toString();
-    const preview = str.slice(0, 300);
-    console.log("[Proxy] Client → Gemini:", preview);
+    if (str.includes('"setup"')) {
+        const preview = str.slice(0, 300);
+        console.log("[Proxy] Client → Gemini:", preview);
+    }
     
     // Detect setup message and log system instruction
     try {

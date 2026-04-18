@@ -44,7 +44,7 @@ export async function GET() {
         try {
             const res = await fetch(
                 `https://generativelanguage.googleapis.com/v1beta/models?key=${GOOGLE_GEMINI_API_KEY}`,
-                { signal: AbortSignal.timeout(5000) }
+                { signal: AbortSignal.timeout(15000) }
             );
             if (res.ok) {
                 const data = await res.json() as { models?: Array<{ name: string }> };
@@ -89,10 +89,10 @@ export async function GET() {
     try {
         const wsProxyUrl = process.env.NEXT_PUBLIC_APP_URL
             ? `${process.env.NEXT_PUBLIC_APP_URL}/ws-gemini`
-            : "http://localhost:3099";
+            : "http://127.0.0.1:3099";
         // We can't do a real WS check from server, but we can try an HTTP request
         const res = await fetch(wsProxyUrl.replace("ws://", "http://").replace("wss://", "https://"), {
-            signal: AbortSignal.timeout(3000),
+            signal: AbortSignal.timeout(10000),
         });
         // Any response (even 400/404) means the proxy process is running
         checks.push({
@@ -109,7 +109,7 @@ export async function GET() {
             name: "ws_proxy",
             nameRu: "WebSocket прокси",
             ok: false,
-            details: isRefused ? "Не запущен" : msg,
+            details: isRefused ? "Не запущен (timeout 10s)" : msg,
             descRu: isRefused
                 ? "❌ WebSocket прокси не запущен. Ассистент не сможет передавать голос. Запустите: node ws-proxy.js"
                 : `❌ Ошибка подключения к WebSocket прокси: ${msg}. Запустите: node ws-proxy.js`,
@@ -118,7 +118,7 @@ export async function GET() {
 
     // 4) ChromaDB has documents
     try {
-        const res = await fetch(`${INDEXER_URL}/health`, { signal: AbortSignal.timeout(3000) });
+        const res = await fetch(`${INDEXER_URL}/health`, { signal: AbortSignal.timeout(10000) });
         if (res.ok) {
             const data = await res.json() as { chroma_documents: number; watcher_active: boolean };
             const hasDocs = data.chroma_documents > 0;

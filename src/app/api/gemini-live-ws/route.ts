@@ -33,7 +33,6 @@ export async function GET(req: NextRequest) {
     if (!clientSocket) return response;
 
     // Подключаемся к Gemini с сервера
-    // @ts-expect-error ws is available as transitive dependency
     const { WebSocket: NodeWS } = await import("ws");
     const geminiWs = new NodeWS(geminiWsUrl);
 

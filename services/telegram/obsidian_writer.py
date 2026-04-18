@@ -80,7 +80,11 @@ def _format_message(msg: dict) -> str:
     # Author
     author = msg.get("from", "")
     if author:
-        parts.append(f"**{author}**:")
+        # If it's the user's out message, exporter.py already sets it to "Я (Антон)"
+        if author == "Я (Антон)":
+            parts.append(f"**{author}**:")
+        else:
+            parts.append(f"**Собеседник ({author})**:")
 
     # Forwarded
     fwd = msg.get("forwarded_from")

@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
         });
 
         // ── 2. Auto-save user message (fire-and-forget) ──
-        autoSaveUserMessage(userId, messages);
+        autoSaveUserMessage(userId, messages as any);
 
         // ── 3. Classify for counter tags (async) ──
         const classifyMsg = messages.filter((m) => m.role === "user").pop();
@@ -151,7 +151,7 @@ function handleDeepSeek(
             ];
         } else {
             // Text mode: use function calling (web_search, save_memory, etc.)
-            const { finalMessages } = await deepseekProvider.callWithTools(userId, textMessages as Array<{ role: string; content: string | ContentPart[] }>, enrichedPrompt);
+            const { finalMessages } = await deepseekProvider.callWithTools(userId, textMessages as any, enrichedPrompt);
             finalMsgs = finalMessages;
         }
 
@@ -194,7 +194,7 @@ async function handleOpenAI(
                 ...messages.map((m) => ({ role: m.role, content: m.content })),
             ];
         } else {
-            const { finalMessages } = await openaiProvider.callWithTools(userId, messages, enrichedPrompt);
+            const { finalMessages } = await openaiProvider.callWithTools(userId, messages as any, enrichedPrompt);
             finalMsgs = finalMessages;
         }
 

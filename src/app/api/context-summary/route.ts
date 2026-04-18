@@ -6,7 +6,7 @@ import {
     loadSessionSummaries,
 } from "@/lib/contextManager";
 import { loadVaultNotes } from "@/lib/vaultContext";
-import { getGoldenContextChars, GOLDEN_CIRCLE } from "@/lib/goldenContext";
+import { getGoldenContextChars } from "@/lib/goldenContext";
 
 /**
  * GET /api/context-summary
@@ -36,7 +36,12 @@ export async function GET(req: NextRequest) {
 
         // Golden context (inner circle — always present)
         const goldenChars = getGoldenContextChars();
-        const goldenPersonCount = GOLDEN_CIRCLE.length;
+        let goldenPersonCount = 0;
+        try {
+            const { loadDynamicGoldenContext } = await import("@/lib/goldenContext");
+            const g = await loadDynamicGoldenContext();
+            goldenPersonCount = g.length;
+        } catch { }
 
         // Match the real CONTEXT_BUDGET used in gemini-live-token
         const CONTEXT_BUDGET = 80000;

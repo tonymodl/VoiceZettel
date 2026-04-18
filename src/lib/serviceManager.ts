@@ -79,7 +79,7 @@ export async function checkObsidianHealth(): Promise<boolean> {
 export async function killPort(port: number): Promise<void> {
     try {
         await execAsync(
-            `powershell -Command "Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"`,
+            `powershell -ExecutionPolicy Bypass -Command "Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"`,
             { timeout: 10000 },
         );
     } catch {
@@ -90,13 +90,30 @@ export async function killPort(port: number): Promise<void> {
 // ── Start a service ──────────────────────────────────────────
 
 export async function startService(cwd: string, command: string, args: string[]): Promise<void> {
+    const fs = await import("fs");
+    const path = await import("path");
     const { spawn } = await import("child_process");
+    
+    // Create logs directory if it doesn't exist
+    const logDir = path.join(process.cwd(), "logs");
+    if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+    }
+    
+    // Create a log file for this service
+    // sanitize command name for file name
+    const safeName = args.join("_").replace(/[^a-z0-9]/gi, '_').substring(0, 20) || "service";
+    const logFile = path.join(logDir, `${safeName}.log`);
+    const out = fs.openSync(logFile, "a");
+    const err = fs.openSync(logFile, "a");
+
     const child = spawn(command, args, {
         cwd,
         detached: true,
-        stdio: "ignore",
+        stdio: ["ignore", out, err],
         shell: true,
         windowsHide: true,
+        env: { ...process.env, PYTHONUNBUFFERED: "1" }
     });
     child.unref();
     // Give it time to start

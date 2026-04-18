@@ -47,15 +47,15 @@ if errorlevel 1 (
 )
 
 :: ─────────────────────────────────────────────────────
-:: 3. Telegram Service (export + sync, port 8020)
+:: 3. Telegram Service (export + sync, port 8038)
 :: ─────────────────────────────────────────────────────
-echo [3/6] Запуск Telegram Service (порт 8020)...
-netstat -aon 2>nul | find ":8020" >nul
+echo [3/6] Запуск Telegram Service (порт 8038)...
+netstat -aon 2>nul | find ":8038" >nul
 if errorlevel 1 (
-    start /B /MIN "VZ-Telegram" cmd /c "cd /d %PROJECT_DIR%\services\telegram && "%UVICORN%" main:app --host 0.0.0.0 --port 8020 --log-level info > "%LOG_DIR%\telegram.log" 2>&1"
-    echo       ✓ Telegram запущен на :8020
+    start /B /MIN "VZ-Telegram" cmd /c "cd /d %PROJECT_DIR%\services\telegram && "%UVICORN%" main:app --host 0.0.0.0 --port 8038 --log-level info > "%LOG_DIR%\telegram.log" 2>&1"
+    echo       ✓ Telegram запущен на :8038
 ) else (
-    echo       • Telegram уже запущен на :8020
+    echo       • Telegram уже запущен на :8038
 )
 
 :: ─────────────────────────────────────────────────────
@@ -95,14 +95,14 @@ timeout /t 3 /nobreak >nul
 "%NODE%" -e "fetch('http://localhost:8030/health').then(()=>console.log('       ✓ Indexer: OK')).catch(()=>console.log('       ⚠ Indexer: не готов (подождите)'))" 2>nul
 
 :: Check Telegram
-"%NODE%" -e "fetch('http://localhost:8020/health').then(()=>console.log('       ✓ Telegram: OK')).catch(()=>console.log('       ⚠ Telegram: не готов (подождите)'))" 2>nul
+"%NODE%" -e "fetch('http://localhost:8038/health').then(()=>console.log('       ✓ Telegram: OK')).catch(()=>console.log('       ⚠ Telegram: не готов (подождите)'))" 2>nul
 
 echo.
 echo  ╔═══════════════════════════════════════════════╗
 echo  ║        Все сервисы VoiceZettel запущены!       ║
 echo  ║                                               ║
 echo  ║  Frontend:    http://localhost:3000            ║
-echo  ║  Telegram:    http://localhost:8020            ║
+echo  ║  Telegram:    http://localhost:8038            ║
 echo  ║  Indexer:     http://localhost:8030            ║
 echo  ║  Obsidian:    REST API :27123                 ║
 echo  ║                                               ║

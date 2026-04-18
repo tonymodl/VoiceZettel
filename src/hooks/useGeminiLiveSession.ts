@@ -268,18 +268,20 @@ export function useGeminiLiveSession() {
     }, []);
 
     /* ── Cleanup mic resources ── */
-    const cleanupMic = useCallback(() => {
+    const cleanupMic = useCallback((keepStreamOpen = false) => {
         if (processorRef.current) {
             processorRef.current.disconnect();
             processorRef.current = null;
         }
-        if (micAudioCtxRef.current && micAudioCtxRef.current.state !== "closed") {
-            micAudioCtxRef.current.close().catch(() => { /* silent */ });
-            micAudioCtxRef.current = null;
-        }
-        if (micStreamRef.current) {
-            micStreamRef.current.getTracks().forEach((t) => t.stop());
-            micStreamRef.current = null;
+        if (!keepStreamOpen) {
+            if (micAudioCtxRef.current && micAudioCtxRef.current.state !== "closed") {
+                micAudioCtxRef.current.close().catch(() => { /* silent */ });
+                micAudioCtxRef.current = null;
+            }
+            if (micStreamRef.current) {
+                micStreamRef.current.getTracks().forEach((t) => t.stop());
+                micStreamRef.current = null;
+            }
         }
     }, []);
 
@@ -320,6 +322,17 @@ export function useGeminiLiveSession() {
 
                 // Invalidate cache so next connect gets fresh data
                 invalidatePrewarmCache();
+            } else if (micStreamRef.current && micStreamRef.current.active) {
+                // ⚡ RECONNECT PATH — reuse existing mic
+                logger.info("[GeminiLive] Reusing existing microphone stream");
+                stream = micStreamRef.current;
+                
+                const tokenResult = await fetch("/api/gemini-live-token", { method: "POST" });
+                if (!tokenResult.ok) {
+                    const body = await tokenResult.text();
+                    throw new Error(`Token fetch failed: ${body}`);
+                }
+                tokenData = (await tokenResult.json()) as TokenResponse;
             } else {
                 // 🔄 PARALLEL PATH — mic + token simultaneously
                 logger.info("[GeminiLive] No valid cache, fetching mic + token in parallel");
@@ -480,10 +493,12 @@ export function useGeminiLiveSession() {
             ws.onclose = (ev) => {
                 logger.info(`[GeminiLive] WebSocket closed: code=${ev.code} reason=${ev.reason}`);
                 setIsConnected(false);
-                cleanupMic();
+                
+                const willReconnect = !intentionalCloseRef.current && retryCountRef.current < MAX_RECONNECT_ATTEMPTS;
+                cleanupMic(willReconnect); // keep stream open if we are reconnecting
 
                 // Auto-reconnect with exponential backoff (5 attempts, max 16s)
-                if (!intentionalCloseRef.current && retryCountRef.current < MAX_RECONNECT_ATTEMPTS) {
+                if (willReconnect) {
                     const delay = Math.min(
                         RECONNECT_BASE_DELAY_MS * Math.pow(2, retryCountRef.current),
                         16000,
@@ -500,6 +515,7 @@ export function useGeminiLiveSession() {
                             if (retryCountRef.current >= MAX_RECONNECT_ATTEMPTS) {
                                 setIsReconnecting(false);
                                 logger.error("[GeminiLive] ❌ Max reconnect attempts reached. Voice assistant stopped.");
+                                cleanupMic(false);
                             }
                         });
                     }, delay);
@@ -509,22 +525,27 @@ export function useGeminiLiveSession() {
                 } else {
                     // All retries exhausted — still save session data!
                     setIsReconnecting(false);
+                    cleanupMic(false);
                     logger.error("[GeminiLive] ❌ All reconnect attempts exhausted. Saving session data...");
                     void triggerSessionAnalysis();
                 }
             };
         },
-        [handleMessage, cleanupMic, triggerSessionAnalysis],
+        [handleMessage, cleanupMic, triggerSessionAnalysis, connect],
     );
 
     /* ── Microphone capture ── */
     const startMicCapture = async (ws: WebSocket, stream: MediaStream) => {
+        // If we already have a micCtx, use it, otherwise create one
+        let ctx = micAudioCtxRef.current;
+        if (!ctx || ctx.state === "closed") {
+             ctx = new AudioContext({ sampleRate: 16000 });
+             micAudioCtxRef.current = ctx;
+        }
 
-        const ctx = new AudioContext({ sampleRate: 16000 });
         if (ctx.state === "suspended") {
             await ctx.resume();
         }
-        micAudioCtxRef.current = ctx;
 
         const source = ctx.createMediaStreamSource(stream);
         const processor = ctx.createScriptProcessor(4096, 1, 1);
@@ -563,7 +584,7 @@ export function useGeminiLiveSession() {
             reconnectTimerRef.current = null;
         }
 
-        cleanupMic();
+        cleanupMic(false); // Fully stop mic
 
         if (playbackCtxRef.current && playbackCtxRef.current.state !== "closed") {
             playbackCtxRef.current.close().catch(() => { /* silent */ });

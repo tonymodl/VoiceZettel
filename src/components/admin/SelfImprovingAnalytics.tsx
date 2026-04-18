@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
     TrendingUp, TrendingDown, Minus, AlertTriangle,
     Brain, Heart, Zap, Clock, BarChart3, RefreshCw, Loader2,
+    Settings2, Save, X
 } from "lucide-react";
 
 /* ── Types — aligned with backend (session_analytics table + empathyEngine) ── */
@@ -47,6 +48,11 @@ export function SelfImprovingAnalytics() {
     const [empathy, setEmpathy] = useState<BackendEmpathyProfile | null>(null);
     const [empathyExists, setEmpathyExists] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    
+    // --- Edit Mode States ---
+    const [isEditing, setIsEditing] = useState(false);
+    const [editValue, setEditValue] = useState("");
+    const [isSaving, setIsSaving] = useState(false);
 
     const fetchData = useCallback(async () => {
         setIsLoading(true);
@@ -73,6 +79,28 @@ export function SelfImprovingAnalytics() {
             setIsLoading(false);
         }
     }, []);
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        try {
+            const parsed = JSON.parse(editValue);
+            const res = await fetch("/api/empathy-profile", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId: "anonymous", profile: parsed })
+            });
+            if (res.ok) {
+                setEmpathy(parsed);
+                setIsEditing(false);
+            } else {
+                alert("Ошибка сохранения");
+            }
+        } catch (e) {
+            alert("Невалидный JSON: " + String(e));
+        } finally {
+            setIsSaving(false);
+        }
+    };
 
     useEffect(() => {
         fetchData();
@@ -120,15 +148,58 @@ export function SelfImprovingAnalytics() {
                     <span className="text-base">📈</span>
                     <h3 className="text-sm font-bold text-zinc-200">Аналитика самоулучшения</h3>
                 </div>
-                <button
-                    onClick={fetchData}
-                    className="rounded-lg border border-zinc-700 bg-zinc-800 p-1.5 text-zinc-400 transition-colors hover:text-zinc-200"
-                >
-                    <RefreshCw className="size-3.5" />
-                </button>
+                <div className="flex items-center gap-2">
+                    {empathyExists && (
+                        <button
+                            onClick={() => {
+                                if (isEditing) {
+                                    setIsEditing(false);
+                                } else {
+                                    setEditValue(JSON.stringify(empathy, null, 2));
+                                    setIsEditing(true);
+                                }
+                            }}
+                            className={`rounded-lg border px-2 py-1.5 transition-colors ${
+                                isEditing 
+                                    ? "border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20" 
+                                    : "border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20"
+                            }`}
+                            title={isEditing ? "Отмена" : "Редактировать профиль и выводы"}
+                        >
+                            {isEditing ? <X className="size-3.5" /> : <Settings2 className="size-3.5" />}
+                        </button>
+                    )}
+                    <button
+                        onClick={fetchData}
+                        className="rounded-lg border border-zinc-700 bg-zinc-800 p-1.5 text-zinc-400 transition-colors hover:text-zinc-200"
+                    >
+                        <RefreshCw className="size-3.5" />
+                    </button>
+                </div>
             </div>
 
-            {analytics.length === 0 ? (
+            {isEditing ? (
+                <div className="animate-in fade-in space-y-3">
+                    <p className="text-[11px] text-violet-300">
+                        Вы можете вручную скорректировать ДНК общения, выученные правила и автоматизации в формате JSON.
+                    </p>
+                    <textarea
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        className="h-[400px] w-full resize-y rounded-xl border border-zinc-700 bg-zinc-950 p-4 font-mono text-[11px] text-green-400 focus:border-violet-500 focus:outline-none"
+                    />
+                    <div className="flex justify-end">
+                        <button
+                            onClick={handleSave}
+                            disabled={isSaving}
+                            className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-xs font-bold text-white transition-all hover:bg-violet-500 disabled:opacity-50"
+                        >
+                            {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+                            Сохранить изменения
+                        </button>
+                    </div>
+                </div>
+            ) : analytics.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-center">
                     <Brain className="mx-auto mb-2 size-8 text-zinc-600" />
                     <p className="text-[12px] text-zinc-500">

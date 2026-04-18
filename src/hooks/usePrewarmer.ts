@@ -129,7 +129,7 @@ export function usePrewarmer() {
             .catch(() => { /* fallback in startVoice */ });
 
         // 3. Pre-warm OpenAI Realtime token
-        fetch("/api/realtime-token", { signal: AbortSignal.timeout(5000) })
+        fetch("/api/realtime-token", { method: "POST", signal: AbortSignal.timeout(5000) })
             .then(res => res.ok ? res.json() : null)
             .then(data => {
                 if (data?.client_secret?.value) {

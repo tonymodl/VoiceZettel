@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getWatchdogStatus } from "@/lib/watchdog";
-import { GOLDEN_CIRCLE } from "@/lib/goldenContext";
+import { getGoldenCircle, type GoldenPerson } from "@/lib/goldenContext";
 import { contextCache } from "@/lib/contextCache";
 import { toBangkokISO } from "@/lib/timezone";
 import { getAllBreakerStatus } from "@/lib/circuitBreaker";
@@ -17,6 +17,14 @@ export function GET() {
 
     const cacheStats = contextCache.getStats();
     const breakerStatus = getAllBreakerStatus();
+    
+    // Load dynamic Golden Context from SQLite
+    let goldenContexts: GoldenPerson[] = [];
+    try {
+        goldenContexts = getGoldenCircle();
+    } catch {
+        // Fallback or ignore
+    }
 
     return NextResponse.json({
         status: "ok",
@@ -27,8 +35,8 @@ export function GET() {
         uptime: process.uptime(),
         memory: process.memoryUsage().heapUsed,
         context: {
-            goldenCircle: GOLDEN_CIRCLE.length,
-            goldenCircleNames: GOLDEN_CIRCLE.map(p => p.name),
+            goldenCircle: goldenContexts.length,
+            goldenCircleNames: goldenContexts.map(p => p.name),
             cacheEntries: cacheStats.size,
             cachedKeys: cacheStats.keys,
         },

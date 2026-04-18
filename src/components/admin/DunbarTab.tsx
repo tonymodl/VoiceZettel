@@ -28,6 +28,8 @@ const CIRCLE_CONFIG = [
     { circle: 5, name: "Периферия", max: 150, color: "text-zinc-400", borderColor: "border-zinc-600", bgColor: "bg-zinc-500/10", desc: "Все остальные контакты" },
 ];
 
+import { GoldenContextEditor } from "./GoldenContextEditor";
+
 /* ── Component ── */
 export function DunbarTab() {
     const [people, setPeople] = useState<DunbarPerson[]>([]);
@@ -108,10 +110,13 @@ export function DunbarTab() {
                 </button>
             </div>
 
+            {/* Editable Golden Context (Priority Memory) */}
+            <GoldenContextEditor />
+
             {/* Circle rings visualization */}
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
                 <h3 className="mb-4 text-xs font-bold uppercase tracking-wider text-zinc-500">
-                    Концентрические круги
+                    Концентрические круги (Общая статистика)
                 </h3>
                 <div className="grid grid-cols-5 gap-3">
                     {circleStats.map((c) => (

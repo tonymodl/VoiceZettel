@@ -31,7 +31,7 @@ export interface GoldenPerson {
 
 // ── Static Inner Circle (NEVER changes without user approval) ──
 
-export const GOLDEN_CIRCLE: GoldenPerson[] = [
+export const DEFAULT_GOLDEN_CIRCLE: GoldenPerson[] = [
     // ═══ Circle 1 — Ядро (самые близкие) ═══
     {
         name: "Настя Рудакова",
@@ -117,13 +117,67 @@ export const GOLDEN_CIRCLE: GoldenPerson[] = [
     },
 ];
 
+// ── Database Access ──────────────────────────────────────────
+
+import { getDb } from "@/lib/db";
+
+function ensureGoldenTable(): void {
+    const db = getDb();
+    db.prepare(`
+        CREATE TABLE IF NOT EXISTS golden_context (
+            user_id TEXT PRIMARY KEY,
+            data_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    `).run();
+}
+
+/**
+ * Returns the customized golden circle from SQLite.
+ * Falls back to DEFAULT_GOLDEN_CIRCLE if none exists.
+ */
+export function getGoldenCircle(userId: string = "anonymous"): GoldenPerson[] {
+    try {
+        ensureGoldenTable();
+        const db = getDb();
+        const row = db.prepare(`SELECT data_json FROM golden_context WHERE user_id = ?`).get(userId) as { data_json: string } | undefined;
+        if (!row) {
+            return DEFAULT_GOLDEN_CIRCLE;
+        }
+        return JSON.parse(row.data_json) as GoldenPerson[];
+    } catch (err) {
+        logger.error(`[GoldenContext] DB Error: ${err}`);
+        return DEFAULT_GOLDEN_CIRCLE;
+    }
+}
+
+/**
+ * Saves the golden circle back to the DB to persist user changes.
+ */
+export function saveGoldenCircle(people: GoldenPerson[], userId: string = "anonymous"): void {
+    try {
+        ensureGoldenTable();
+        const db = getDb();
+        db.prepare(`
+            INSERT INTO golden_context (user_id, data_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                data_json = excluded.data_json,
+                updated_at = excluded.updated_at
+        `).run(userId, JSON.stringify(people), new Date().toISOString());
+        logger.info(`[GoldenContext] Saved ${people.length} people for ${userId}`);
+    } catch (err) {
+        logger.error(`[GoldenContext] Save Error: ${err}`);
+    }
+}
+
 // ── Builders ─────────────────────────────────────────────────
 
 /**
  * Build the golden context block for injection into the system prompt.
  * This is a compact markdown block that fits in ~1500 chars.
  */
-export function buildGoldenContextBlock(): string {
+export function buildGoldenContextBlock(userId: string = "anonymous"): string {
     const lines: string[] = [
         "",
         "═══════════════════════════════════════════════",
@@ -132,8 +186,9 @@ export function buildGoldenContextBlock(): string {
         "",
     ];
 
+    const peopleList = getGoldenCircle(userId);
     const byCircle = new Map<number, GoldenPerson[]>();
-    for (const p of GOLDEN_CIRCLE) {
+    for (const p of peopleList) {
         const arr = byCircle.get(p.circle) ?? [];
         arr.push(p);
         byCircle.set(p.circle, arr);
@@ -167,7 +222,7 @@ export function buildGoldenContextBlock(): string {
 
     // Alias lookup table for voice recognition
     lines.push("### 🎙 АЛИАСЫ (распознавание голоса)");
-    for (const p of GOLDEN_CIRCLE) {
+    for (const p of peopleList) {
         if (p.aliases && p.aliases.length > 0) {
             lines.push(`• ${p.aliases.join(" / ")} → **${p.name}** (${p.relation})`);
         }
@@ -189,10 +244,10 @@ export function buildGoldenContextBlock(): string {
  * Falls back to static data if the API is unavailable.
  * This runs server-side only.
  */
-export async function loadDynamicGoldenContext(): Promise<string> {
+export async function loadDynamicGoldenContext(userId: string = "anonymous"): Promise<string> {
     try {
         // Try to fetch additional people from Dunbar API
-        const res = await fetch("http://127.0.0.1:3000/api/dunbar/list?userId=anonymous", {
+        const res = await fetch("http://127.0.0.1:3000/api/dunbar/list?userId=" + userId, {
             signal: AbortSignal.timeout(3000),
         });
 
@@ -203,7 +258,8 @@ export async function loadDynamicGoldenContext(): Promise<string> {
 
             if (data.people && data.people.length > 0) {
                 // Merge dynamic people with static (static takes priority)
-                const staticNames = new Set(GOLDEN_CIRCLE.map((p) => p.name.toLowerCase()));
+                const peopleList = getGoldenCircle(userId);
+                const staticNames = new Set(peopleList.map((p) => p.name.toLowerCase()));
                 const dynamicPeople = data.people.filter(
                     (p) => !staticNames.has(p.name.toLowerCase()) && p.circle <= 2,
                 );
@@ -214,7 +270,7 @@ export async function loadDynamicGoldenContext(): Promise<string> {
                         .map((p) => `• ${p.name} — ${p.relation} | ${p.notes || ""}`)
                         .join("\n");
 
-                    return buildGoldenContextBlock() + `\n### 🔵 ДОПОЛНИТЕЛЬНО (из памяти)\n${extra}\n`;
+                    return buildGoldenContextBlock(userId) + `\n### 🔵 ДОПОЛНИТЕЛЬНО (из памяти)\n${extra}\n`;
                 }
             }
         }
@@ -222,15 +278,15 @@ export async function loadDynamicGoldenContext(): Promise<string> {
         logger.debug(`[GoldenContext] Dynamic load skipped: ${err instanceof Error ? err.message : "unknown"}`);
     }
 
-    return buildGoldenContextBlock();
+    return buildGoldenContextBlock(userId);
 }
 
 /**
  * Get the character count of the golden context block.
  * Used for context budget calculations.
  */
-export function getGoldenContextChars(): number {
-    return buildGoldenContextBlock().length;
+export function getGoldenContextChars(userId: string = "anonymous"): number {
+    return buildGoldenContextBlock(userId).length;
 }
 
 /**
@@ -246,9 +302,10 @@ export function getInvestorContextCharsCount(): number {
  * Used when context budget is tight (e.g., voice-only sessions).
  * ~400 chars instead of ~1500.
  */
-export function getGoldenContextForVoice(): string {
+export function getGoldenContextForVoice(userId: string = "anonymous"): string {
     const lines: string[] = ["БЛИЖНИЙ КРУГ:"];
-    for (const p of GOLDEN_CIRCLE.filter(p => p.circle <= 2)) {
+    const peopleList = getGoldenCircle(userId);
+    for (const p of peopleList.filter(p => p.circle <= 2)) {
         const pron = p.pronunciation ? ` [${p.pronunciation}]` : "";
         lines.push(`• ${p.name}${pron} — ${p.relation}`);
     }

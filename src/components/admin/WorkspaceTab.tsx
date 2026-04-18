@@ -117,20 +117,20 @@ export default function WorkspaceTab() {
       // 1. Get access token
       const tokenRes = await fetch("/api/auth/google/picker-token");
       if (!tokenRes.ok) throw new Error("Не удалось получить токен");
-      const { accessToken, clientId, appId } = await tokenRes.json();
+      const { accessToken, clientId, appId } = (await tokenRes.json()) as any;
 
       // 2. Load Picker script
       await loadPickerScript();
 
       // 3. Open Picker
-      const google = (window as unknown as Record<string, unknown>).google as {
+      const google = (window as any).google as {
         picker: {
           PickerBuilder: new () => {
-            addView: (view: unknown) => unknown;
-            setOAuthToken: (token: string) => unknown;
-            setDeveloperKey: (key: string) => unknown;
-            setAppId: (id: string) => unknown;
-            setCallback: (cb: (data: { action: string; docs?: Array<{ id: string; name: string; url: string; mimeType: string }> }) => void) => unknown;
+            addView: (view: unknown) => any;
+            setOAuthToken: (token: string) => any;
+            setDeveloperKey: (key: string) => any;
+            setAppId: (id: string) => any;
+            setCallback: (cb: (data: { action: string; docs?: Array<{ id: string; name: string; url: string; mimeType: string }> }) => void) => any;
             build: () => { setVisible: (visible: boolean) => void };
           };
           ViewId: { DOCS: string; SPREADSHEETS: string; PRESENTATIONS: string };
