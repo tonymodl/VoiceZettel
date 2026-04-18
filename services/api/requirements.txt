@@ -1,6 +1,5 @@
 fastapi==0.110.0
 uvicorn[standard]==0.27.0
 chromadb==0.4.24
-better-sqlite3==12.8.0
 pydantic==2.7.0
 python-dotenv==1.0.1

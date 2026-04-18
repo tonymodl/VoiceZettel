@@ -7,3 +7,4 @@ python-dotenv
 pyyaml
 pydantic
 rank-bm25
+sentence-transformers

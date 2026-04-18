@@ -21,12 +21,17 @@ let isSpeaking = false;
 let scheduledSources: AudioBufferSourceNode[] = [];
 
 let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 5;
-const RECONNECT_BASE_MS = 1000;
+const MAX_RECONNECT_ATTEMPTS = 12;       // more attempts — persistent session
+const RECONNECT_BASE_MS = 300;           // start fast, exponential backoff
+const RECONNECT_MAX_MS = 8000;           // cap at 8s
 
 // Session transcript accumulator for post-session memory pipeline
 let sessionTranscript: Array<{ role: string; text: string }> = [];
 let sessionStartTime = "";
+
+// ── Auto-reconnect state: preserve opts across reconnects ──
+let lastOpts: GeminiLiveOptions | null = null;
+let intentionalDisconnect = false;        // true when user clicks stop
 
 /** Fire-and-forget: save session data to memory pipeline */
 async function triggerSessionSave() {
@@ -136,6 +141,18 @@ function condenseVaultContext(rawContext: string): string {
     }
 
     return condensed.join("\n");
+}
+
+/** Build a short digest of the conversation so far for reconnect context carryover */
+function buildTranscriptDigest(): string {
+    if (sessionTranscript.length === 0) return "";
+    // Take last 20 turns max, truncate each to 200 chars
+    const recent = sessionTranscript.slice(-20);
+    const lines = recent.map(t => {
+        const label = t.role === "user" ? "Антон" : "Ты";
+        return `${label}: ${t.text.slice(0, 200)}`;
+    });
+    return `\n═══ КОНТЕКСТ ТЕКУЩЕЙ СЕССИИ (НЕ ТЕРЯЙ!) ═══\nЭто продолжение разговора. Вот что было сказано:\n${lines.join("\n")}\n═══ ПРОДОЛЖАЙ РАЗГОВОР ЕСТЕСТВЕННО ═══\n`;
 }
 
 function buildSystemInstruction(vaultContext: string, compiledRules?: string, empathyBlock?: string): string {
@@ -415,11 +432,14 @@ AI голос: Google Gemini Multimodal Live API (WebSocket) + OpenAI API
     // Inject empathy profile (auto-evolved behavior tuning from server)
     const withEmpathy = empathyBlock ? `${fullPrompt}\n${empathyBlock}` : fullPrompt;
 
+    // Inject conversation digest on reconnect for context continuity
+    const transcriptDigest = buildTranscriptDigest();
+
     if (vaultContext && vaultContext.trim().length > 0) {
-        return `${withEmpathy}\n\n${vaultContext.slice(0, 80000)}`;
+        return `${withEmpathy}\n\n${transcriptDigest}${vaultContext.slice(0, 80000)}`;
     }
 
-    return withEmpathy;
+    return `${withEmpathy}\n\n${transcriptDigest}`;
 }
 
 /** Build Gemini Live tool declarations based on active capabilities */
@@ -641,7 +661,11 @@ function buildTools(caps?: GeminiLiveOptions["capabilities"]) {
 }
 
 export function connectGeminiLive(opts: GeminiLiveOptions) {
-    opts.onLog("WS открывается...", { wsUrl: opts.wsUrl, hasVault: opts.vaultContext.length > 0, hasTools: !!opts.capabilities?.voiceTools });
+    // Save opts for auto-reconnect
+    lastOpts = opts;
+    intentionalDisconnect = false;
+
+    opts.onLog("WS открывается...", { wsUrl: opts.wsUrl, hasVault: opts.vaultContext.length > 0, hasTools: !!opts.capabilities?.voiceTools, reconnectAttempt: reconnectAttempts });
 
     if (!playbackCtx || playbackCtx.state === "closed") {
         playbackCtx = new AudioContext({ sampleRate: 24000 });
@@ -700,8 +724,11 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
 
         if (data.setupComplete && !setupCompleted) {
             setupCompleted = true;
+            // Reset reconnect counter on successful connection
+            reconnectAttempts = 0;
             opts.onLog("setupComplete получен, запускаю mic");
             opts.onOrbState("listening");
+            opts.onTranscript("");   // clear "Переподключение..." message
             void startMicFromStream(opts.micStream, opts);
             return;
         }
@@ -841,33 +868,81 @@ export function connectGeminiLive(opts: GeminiLiveOptions) {
     ws.onerror = (e) => {
         opts.onLog("WS ошибка", e);
         isSpeaking = false;
-        opts.onOrbState("idle");
+        // Don't set idle — onclose will handle reconnect
     };
     ws.onclose = (ev) => {
-        opts.onLog("WS закрыт", { code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
+        opts.onLog("WS закрыт", { code: ev.code, reason: ev.reason, wasClean: ev.wasClean, intentional: intentionalDisconnect });
         isSpeaking = false;
         stopPlayback();
 
-        // Exponential backoff reconnect for abnormal closures (micro-drops)
-        if (ev.code === 1006 && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        // If user explicitly stopped — don't reconnect
+        if (intentionalDisconnect) {
+            reconnectAttempts = 0;
+            opts.onOrbState("idle");
+            void triggerSessionSave();
+            return;
+        }
+
+        // ── Auto-reconnect for ANY abnormal close ──
+        // Normal close = code 1000. Everything else = try again.
+        const isNormalClose = ev.code === 1000 && ev.wasClean;
+        if (!isNormalClose && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttempts++;
-            const delayMs = RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts - 1);
-            opts.onLog(`WS micro-drop, reconnect attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${delayMs}ms`);
-            opts.onOrbState("idle"); // will be updated to "listening" on successful reconnect
+            const rawDelay = RECONNECT_BASE_MS * Math.pow(1.5, reconnectAttempts - 1);
+            const delayMs = Math.min(rawDelay, RECONNECT_MAX_MS);
+            opts.onLog(`🔄 Auto-reconnect ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${delayMs}ms (code: ${ev.code})`);
+            opts.onOrbState("thinking"); // show user we're reconnecting, not dead
+            opts.onTranscript("Переподключение...");
+
+            // Close old mic processor ONLY — keep the stream alive!
+            if (processor) {
+                processor.disconnect();
+                processor = null;
+            }
+            if (audioCtx && audioCtx.state !== "closed") {
+                audioCtx.close().catch(() => {});
+                audioCtx = null;
+            }
+            // DO NOT close micStream — reuse it!
+
             setTimeout(() => {
-                opts.onLog(`WS reconnecting (attempt ${reconnectAttempts})...`);
-                connectGeminiLive(opts);
+                opts.onLog(`🔄 Reconnecting (attempt ${reconnectAttempts})...`);
+                // Reuse the same mic stream if it's still active
+                if (micStream && micStream.active) {
+                    connectGeminiLive({ ...opts, micStream });
+                } else {
+                    // Mic died — need fresh one, but this shouldn't happen normally
+                    opts.onLog("⚠️ Mic stream died during reconnect, requesting new one");
+                    navigator.mediaDevices.getUserMedia({
+                        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 },
+                    }).then(newStream => {
+                        connectGeminiLive({ ...opts, micStream: newStream });
+                    }).catch(err => {
+                        opts.onLog("❌ Cannot get mic for reconnect: " + (err as Error).message);
+                        opts.onOrbState("idle");
+                        reconnectAttempts = 0;
+                        void triggerSessionSave();
+                    });
+                }
             }, delayMs);
         } else {
-            reconnectAttempts = 0; // Reset for next session
+            // Max attempts exhausted or normal close
+            if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                opts.onLog(`❌ Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) exhausted`);
+                opts.onTranscript("Соединение потеряно — нажми на шар для перезапуска");
+            }
+            reconnectAttempts = 0;
             opts.onOrbState("idle");
-            // Save session on final close (not reconnect)
             void triggerSessionSave();
         }
     };
 }
 
 export function disconnectGeminiLive() {
+    // Mark as intentional so onclose doesn't auto-reconnect
+    intentionalDisconnect = true;
+    lastOpts = null;
+
     processor?.disconnect();
     processor = null;
     audioCtx?.close().catch(() => { /* silent */ });
@@ -887,6 +962,7 @@ export function disconnectGeminiLive() {
     playbackCtx = null;
     isSpeaking = false;
     sessionStartTime = "";
+    reconnectAttempts = 0;
 }
 
 async function startMicFromStream(stream: MediaStream, opts: GeminiLiveOptions) {
