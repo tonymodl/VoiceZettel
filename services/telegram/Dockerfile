@@ -16,6 +16,6 @@ COPY . .
 # Session persistence
 VOLUME /app/session
 
-EXPOSE 8020
+EXPOSE 8038
 
 CMD ["python", "main.py"]

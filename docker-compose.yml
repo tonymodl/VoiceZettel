@@ -53,15 +53,18 @@ services:
       context: services/telegram
       dockerfile: Dockerfile
     ports:
-      - "8020:8020"
+      - "8020:8038"
     environment:
       - VAULT_PATH=/vault
+      - INDEXER_SERVICE_URL=http://indexer:8030
       - OBSIDIAN_REST_URL=${OBSIDIAN_REST_URL:-https://host.docker.internal:27124}
       - OBSIDIAN_REST_API_KEY=${OBSIDIAN_REST_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     volumes:
       - ${VAULT_PATH:-./VoiceZettel}:/vault
       - telegram_session:/app/session
+    depends_on:
+      - indexer
     restart: unless-stopped
 
   indexer:
