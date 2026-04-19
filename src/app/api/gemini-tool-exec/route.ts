@@ -328,15 +328,25 @@ export async function POST(req: NextRequest) {
                         const data = await res.json() as { chat_name: string; message_id: number };
                         result = {
                             sent: true,
+                            verified: true,
                             recipient: data.chat_name,
                             message_id: data.message_id,
+                            instruction: `Скажи: "Отправила ${data.chat_name}: ${text.slice(0, 50)}"`,
                         };
                     } else {
                         const errBody = await res.json().catch(() => ({ detail: res.statusText })) as { detail?: string };
-                        result = { error: errBody.detail ?? `Ошибка ${res.status}` };
+                        result = {
+                            error: errBody.detail ?? `Ошибка ${res.status}`,
+                            verified: false,
+                            instruction: `Скажи пользователю: "Не получилось отправить: ${errBody.detail ?? res.statusText}"`,
+                        };
                     }
                 } catch (err) {
-                    result = { error: `Telegram сервис недоступен: ${err instanceof Error ? err.message : String(err)}` };
+                    result = {
+                        error: `Telegram сервис недоступен: ${err instanceof Error ? err.message : String(err)}`,
+                        verified: false,
+                        instruction: "Скажи пользователю: 'Telegram сервис сейчас недоступен. Попробуй через минуту.'",
+                    };
                 }
                 break;
             }
@@ -495,10 +505,10 @@ export async function POST(req: NextRequest) {
                             // Format events for voice-friendly output
                             const formatted = data.events.map((ev, i) => {
                                 const start = ev.start.dateTime
-                                    ? new Date(ev.start.dateTime).toLocaleString("ru-RU", { timeZone: "Asia/Bangkok", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })
+                                    ? new Date(ev.start.dateTime).toLocaleString("ru-RU", { timeZone: "Asia/Barnaul", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })
                                     : ev.start.date || "весь день";
                                 const end = ev.end.dateTime
-                                    ? new Date(ev.end.dateTime).toLocaleString("ru-RU", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit" })
+                                    ? new Date(ev.end.dateTime).toLocaleString("ru-RU", { timeZone: "Asia/Barnaul", hour: "2-digit", minute: "2-digit" })
                                     : "";
                                 const attendees = ev.attendees?.map(a => a.displayName || a.email).join(", ") || "";
                                 const location = ev.location ? ` 📍 ${ev.location}` : "";
@@ -539,10 +549,10 @@ export async function POST(req: NextRequest) {
                                 summary,
                                 description,
                                 location,
-                                start: allDay ? { date: startStr } : { dateTime: startStr, timeZone: "Asia/Bangkok" },
+                                start: allDay ? { date: startStr } : { dateTime: startStr, timeZone: "Asia/Barnaul" },
                                 end: allDay
                                     ? { date: endStr || startStr }
-                                    : { dateTime: endStr || new Date(new Date(startStr).getTime() + 3600000).toISOString(), timeZone: "Asia/Bangkok" },
+                                    : { dateTime: endStr || new Date(new Date(startStr).getTime() + 3600000).toISOString(), timeZone: "Asia/Barnaul" },
                                 attendees: attendeeEmails?.map(email => ({ email })),
                             };
 
@@ -566,8 +576,8 @@ export async function POST(req: NextRequest) {
                             if (args.summary) updates.summary = String(args.summary);
                             if (args.description) updates.description = String(args.description);
                             if (args.location) updates.location = String(args.location);
-                            if (args.start) updates.start = { dateTime: String(args.start), timeZone: "Asia/Bangkok" };
-                            if (args.end) updates.end = { dateTime: String(args.end), timeZone: "Asia/Bangkok" };
+                            if (args.start) updates.start = { dateTime: String(args.start), timeZone: "Asia/Barnaul" };
+                            if (args.end) updates.end = { dateTime: String(args.end), timeZone: "Asia/Barnaul" };
                             if (args.status) updates.status = String(args.status);
 
                             const updated = await google.calendarUpdateEvent(eventId, updates);
@@ -653,13 +663,18 @@ export async function POST(req: NextRequest) {
 
             case "consult_openai_engine": {
                 const query = String(args.query ?? "");
+                const sessionContext = String(args.session_context ?? "");
                 try {
                     // Proxies the request to the new OpenAI Brain route
                     const baseUrl = req.nextUrl.origin;
                     const res = await fetch(`${baseUrl}/api/openai-brain`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ query, userId }),
+                        body: JSON.stringify({
+                            query,
+                            userId,
+                            context: sessionContext || undefined,
+                        }),
                         signal: AbortSignal.timeout(60000), // OpenAI can take a while with tools
                     });
                     const data = await res.json();

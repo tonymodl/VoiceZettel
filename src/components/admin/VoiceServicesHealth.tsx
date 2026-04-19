@@ -187,7 +187,7 @@ export function VoiceServicesHealth() {
                 nameRu: "AudioContext",
                 icon: <Volume2 className="size-4 text-emerald-400" />,
                 status: "ok",
-                detail: `WebAudio API доступен (state: ${state})`,
+                detail: `WebAudio API (${state})`,
             });
         } catch {
             results.push({
@@ -205,7 +205,7 @@ export function VoiceServicesHealth() {
             nameRu: "Авто-реконнект",
             icon: <RefreshCw className="size-4 text-cyan-400" />,
             status: "ok",
-            detail: "Включён (3 попытки, backoff 1с→2с→4с)",
+            detail: "3 попытки, backoff 1с→4с",
         });
 
         // 8. ChromaDB Context
@@ -219,7 +219,7 @@ export function VoiceServicesHealth() {
                         nameRu: "Контекст (ChromaDB)",
                         icon: <Database className="size-4 text-emerald-400" />,
                         status: "ok",
-                        detail: `${data.chroma_documents.toLocaleString()} чанков (100% базы) | Векторизация: ${data.embedder_enabled ? "Вкл" : "Выкл"}`,
+                        detail: `${data.chroma_documents.toLocaleString()} чанков`,
                     });
                 } else if (data.chroma_documents > 0) {
                     results.push({
@@ -227,7 +227,7 @@ export function VoiceServicesHealth() {
                         nameRu: "Контекст (ChromaDB)",
                         icon: <Database className="size-4 text-amber-400" />,
                         status: "degraded",
-                        detail: `${data.chroma_documents.toLocaleString()} чанков — Неполная база! Идёт сбор или ошибка. Ожидается около 16000.`,
+                        detail: `${data.chroma_documents.toLocaleString()} чанков — неполная база`,
                          healAction: "Запустить индексацию",
                     });
                 } else {
@@ -236,7 +236,7 @@ export function VoiceServicesHealth() {
                         nameRu: "Контекст (ChromaDB)",
                         icon: <Database className="size-4 text-red-500" />,
                         status: "error",
-                        detail: "Векторная база пуста (0 чанков)",
+                        detail: "База пуста (0 чанков)",
                         healAction: "Запустить индексацию",
                     });
                 }
@@ -249,7 +249,7 @@ export function VoiceServicesHealth() {
                 nameRu: "Контекст (ChromaDB)",
                 icon: <Database className="size-4 text-red-400" />,
                 status: "error",
-                detail: "Сервис памяти не отвечает (порт 8030)",
+                detail: "Сервис не отвечает (8030)",
                 healAction: "Перезапустить службу",
             });
         }
@@ -290,15 +290,19 @@ export function VoiceServicesHealth() {
     const totalCount = services.length;
     const overallStatus = okCount === totalCount ? "ready" : okCount > totalCount / 2 ? "degraded" : "broken";
 
-    const overallColors = {
-        ready: "border-emerald-500/30 bg-emerald-500/5",
-        degraded: "border-amber-500/30 bg-amber-500/5",
-        broken: "border-red-500/30 bg-red-500/5",
+    const borderColor = {
+        ready: "border-emerald-500/20",
+        degraded: "border-amber-500/20",
+        broken: "border-red-500/20",
     };
-    const overallLabels = {
-        ready: "✅ Голосовой ассистент готов",
-        degraded: "⚠️ Частично работает",
-        broken: "❌ Критические проблемы",
+
+    const statusBg = (s: VoiceService["status"]) => {
+        switch (s) {
+            case "ok": return "border-emerald-500/20 bg-emerald-500/5";
+            case "degraded": return "border-amber-500/20 bg-amber-500/5";
+            case "error": return "border-red-500/20 bg-red-500/5";
+            case "checking": return "border-zinc-700 bg-zinc-800/50";
+        }
     };
 
     const statusIcon = (s: VoiceService["status"]) => {
@@ -311,14 +315,20 @@ export function VoiceServicesHealth() {
     };
 
     return (
-        <div className={`rounded-2xl border p-4 ${overallColors[overallStatus]}`}>
-            {/* Header */}
+        <div className={`rounded-2xl border ${borderColor[overallStatus]} bg-zinc-900/40 p-4 backdrop-blur`}>
+            {/* Header row */}
             <div className="mb-3 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                    <span className="text-base">🎙</span>
-                    <h3 className="text-sm font-bold text-zinc-200">
-                        Здоровье Голосового Ассистента
-                    </h3>
+                <div className="flex items-center gap-2.5">
+                    <div className={`flex size-8 items-center justify-center rounded-lg ${
+                        overallStatus === "ready" ? "bg-emerald-500/15" :
+                        overallStatus === "degraded" ? "bg-amber-500/15" : "bg-red-500/15"
+                    }`}>
+                        <Mic className={`size-4 ${
+                            overallStatus === "ready" ? "text-emerald-400" :
+                            overallStatus === "degraded" ? "text-amber-400" : "text-red-400"
+                        }`} />
+                    </div>
+                    <h3 className="text-sm font-bold text-zinc-200">🎙 Здоровье голоса</h3>
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                         overallStatus === "ready"
                             ? "bg-emerald-500/20 text-emerald-400"
@@ -346,31 +356,24 @@ export function VoiceServicesHealth() {
                 </div>
             </div>
 
-            {/* Overall status */}
-            <p className="mb-3 text-[12px] font-medium text-zinc-300">
-                {overallLabels[overallStatus]}
-            </p>
-
-            {/* Services grid */}
-            <div className="grid gap-1.5">
+            {/* Services grid — compact cards in a responsive grid */}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                 {services.map((svc) => (
                     <div
                         key={svc.id}
-                        className="flex items-center justify-between rounded-lg bg-zinc-900/50 px-3 py-2"
+                        className={`group relative rounded-xl border p-2.5 transition-all hover:shadow-md ${statusBg(svc.status)}`}
                     >
-                        <div className="flex items-center gap-2.5">
+                        <div className="mb-1 flex items-center gap-1.5">
                             {statusIcon(svc.status)}
                             {svc.icon}
-                            <div>
-                                <p className="text-[12px] font-medium text-zinc-300">{svc.nameRu}</p>
-                                <p className="text-[10px] text-zinc-500">{svc.detail}</p>
-                            </div>
+                            <span className="truncate text-[11px] font-bold text-zinc-200">{svc.nameRu}</span>
                         </div>
+                        <p className="text-[10px] leading-snug text-zinc-500">{svc.detail}</p>
                         {svc.healAction && (
                             <button
                                 onClick={() => handleHeal(svc.id)}
                                 disabled={isHealing === svc.id}
-                                className="flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-400 transition-all hover:bg-amber-500/20 disabled:opacity-50"
+                                className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-400 transition-all hover:bg-amber-500/20 disabled:opacity-50"
                                 title={svc.healAction}
                             >
                                 {isHealing === svc.id ? (
@@ -385,30 +388,30 @@ export function VoiceServicesHealth() {
                 ))}
             </div>
 
-            {/* Context Window visualization */}
+            {/* Context Window — compact horizontal bar */}
             {contextSlots && contextSlots.length > 0 && (
-                <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
-                    <p className="mb-2 text-[11px] font-bold text-zinc-300">
-                        📊 Окно контекста (Context Window)
+                <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/50 p-2.5">
+                    <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                        📊 Окно контекста
                     </p>
-                    <div className="space-y-1.5">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
                         {contextSlots.map((slot) => {
                             const pct = slot.maxChars > 0 ? Math.min((slot.usedChars / slot.maxChars) * 100, 100) : 0;
                             const barColor = pct > 80 ? "bg-red-500" : pct > 50 ? "bg-amber-500" : "bg-emerald-500";
                             return (
-                                <div key={slot.name} className="flex items-center gap-2">
-                                    <span className="w-4 text-center text-[12px]">{slot.emoji}</span>
-                                    <span className="w-24 text-[10px] text-zinc-400">{slot.name}</span>
+                                <div key={slot.name} className="flex items-center gap-1.5">
+                                    <span className="text-[11px]">{slot.emoji}</span>
+                                    <span className="w-16 truncate text-[9px] text-zinc-400">{slot.name}</span>
                                     <div className="flex-1">
-                                        <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                                        <div className="h-1 overflow-hidden rounded-full bg-zinc-800">
                                             <div
                                                 className={`h-full rounded-full ${barColor} transition-all duration-300`}
                                                 style={{ width: `${pct}%` }}
                                             />
                                         </div>
                                     </div>
-                                    <span className="w-12 text-right font-mono text-[9px] text-zinc-600">
-                                        {slot.itemCount > 0 ? `${slot.itemCount}шт` : "—"}
+                                    <span className="w-8 text-right font-mono text-[8px] text-zinc-600">
+                                        {slot.itemCount > 0 ? `${slot.itemCount}` : "—"}
                                     </span>
                                 </div>
                             );

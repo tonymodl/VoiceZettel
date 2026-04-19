@@ -11,7 +11,6 @@ import {
     HeartPulse, Workflow, Satellite,
     Server, FileSearch, TextSearch, Sparkles, Monitor,
 } from "lucide-react";
-import { VoiceTasksPanel } from "./VoiceTasksPanel";
 import { VoicePipelineViz } from "./VoicePipelineViz";
 import { VoiceServicesHealth } from "./VoiceServicesHealth";
 import { SelfImprovingAnalytics } from "./SelfImprovingAnalytics";
@@ -814,95 +813,6 @@ export function DashboardTab() {
             </div>
 
             {/* ══════════════════════════════════════════
-                SELF-HEALING — Always visible diagnostics section
-               ══════════════════════════════════════════ */}
-            <section>
-                <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-500/[0.04] to-transparent p-5 backdrop-blur">
-                    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex items-center gap-3">
-                            <div className="flex size-10 items-center justify-center rounded-xl bg-violet-500/15">
-                                <Wrench className="size-5 text-violet-400" />
-                            </div>
-                            <div>
-                                <h3 className="text-sm font-bold text-zinc-100">🏥 Самоисцеление системы</h3>
-                                <p className="text-xs text-zinc-500">
-                                    Автодиагностика и перезапуск упавших сервисов
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={handleHeal}
-                                disabled={isHealing}
-                                className="flex items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm font-semibold text-violet-400 transition-all hover:bg-violet-500/20 hover:shadow-lg hover:shadow-violet-500/5 active:scale-[0.97] disabled:opacity-50"
-                            >
-                                {isHealing ? <Loader2 className="size-4 animate-spin" /> : <Wrench className="size-4" />}
-                                {isHealing ? "Диагностика..." : "🔧 Запустить диагностику + лечение"}
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Status indicators */}
-                    <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                        <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3 text-center">
-                            <p className="text-lg font-bold text-emerald-400">{onlineCount}</p>
-                            <p className="text-[10px] text-zinc-500">Онлайн</p>
-                        </div>
-                        <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3 text-center">
-                            <p className="text-lg font-bold text-amber-400">{nodes.filter(n => n.status === "degraded").length}</p>
-                            <p className="text-[10px] text-zinc-500">Частично</p>
-                        </div>
-                        <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3 text-center">
-                            <p className="text-lg font-bold text-red-400">{nodes.filter(n => n.status === "offline").length}</p>
-                            <p className="text-[10px] text-zinc-500">Оффлайн</p>
-                        </div>
-                        <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3 text-center">
-                            <p className="text-lg font-bold text-zinc-300">{totalCount}</p>
-                            <p className="text-[10px] text-zinc-500">Всего</p>
-                        </div>
-                    </div>
-
-                    {/* Heal Log */}
-                    {healLog && (
-                        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-                            <div className="mb-3 flex items-center justify-between">
-                                <span className="text-xs font-bold text-zinc-300">📋 Результат последнего лечения:</span>
-                                <button
-                                    onClick={() => setHealLog(null)}
-                                    className="rounded-lg px-2.5 py-1 text-xs text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
-                                >✕ Скрыть</button>
-                            </div>
-                            <div className="space-y-2">
-                                {healLog.map((a, i) => (
-                                    <div key={i} className="flex items-start gap-2.5 text-sm">
-                                        {a.success
-                                            ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-400" />
-                                            : <XCircle className="mt-0.5 size-4 shrink-0 text-red-400" />
-                                        }
-                                        <span className={a.success ? "text-zinc-400" : "text-red-300"}>
-                                            <strong className="text-zinc-200">{a.service}:</strong> {a.descRu}
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {!healLog && (
-                        <p className="text-center text-[11px] text-zinc-600">
-                            Нажмите кнопку выше для запуска полной диагностики всех сервисов и автоматического перезапуска упавших.
-                        </p>
-                    )}
-                </div>
-            </section>
-
-            {/* ══════════════════════════════════════════
-                WATCHDOG DAEMON — Background service monitor
-               ══════════════════════════════════════════ */}
-            <WatchdogWidget />
-
-            {/* ══════════════════════════════════════════
                 PRIORITY 1 — Voice Assistant (main product)
                ══════════════════════════════════════════ */}
             <section>
@@ -979,24 +889,9 @@ export function DashboardTab() {
             </section>
 
             {/* ══════════════════════════════════════════
-                VOICE SERVICES HEALTH — Detailed health checks
+                VOICE SERVICES HEALTH — Compact grid layout
                ══════════════════════════════════════════ */}
             <VoiceServicesHealth />
-
-            {/* ══════════════════════════════════════════
-                VOICE PIPELINE — Data flow visualization
-               ══════════════════════════════════════════ */}
-            <VoicePipelineViz />
-
-            {/* ══════════════════════════════════════════
-                VOICE TASKS — Tasks from assistant
-               ══════════════════════════════════════════ */}
-            <VoiceTasksPanel />
-
-            {/* ══════════════════════════════════════════
-                SELF-IMPROVING ANALYTICS — Satisfaction trends
-               ══════════════════════════════════════════ */}
-            <SelfImprovingAnalytics />
 
             {/* ══════════════════════════════════════════
                 PRIORITY 2 — Service Health Grid
@@ -1408,6 +1303,11 @@ export function DashboardTab() {
             </section>
 
             {/* ══════════════════════════════════════════
+                SELF-IMPROVING ANALYTICS — Right after API keys
+               ══════════════════════════════════════════ */}
+            <SelfImprovingAnalytics />
+
+            {/* ══════════════════════════════════════════
                 PRIORITY 5 — System info (secondary)
                ══════════════════════════════════════════ */}
             <section className="grid gap-4 sm:grid-cols-2">
@@ -1545,6 +1445,98 @@ export function DashboardTab() {
                     </div>
                 )}
             </section>
+
+            {/* ══════════════════════════════════════════
+                BOTTOM — Self-healing, Watchdog, Pipeline (ops tools)
+               ══════════════════════════════════════════ */}
+
+            {/* 🏥 Самоисцеление системы */}
+            <section>
+                <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-500/[0.04] to-transparent p-5 backdrop-blur">
+                    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="flex size-10 items-center justify-center rounded-xl bg-violet-500/15">
+                                <Wrench className="size-5 text-violet-400" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-bold text-zinc-100">🏥 Самоисцеление системы</h3>
+                                <p className="text-xs text-zinc-500">
+                                    Автодиагностика и перезапуск упавших сервисов
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={handleHeal}
+                                disabled={isHealing}
+                                className="flex items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm font-semibold text-violet-400 transition-all hover:bg-violet-500/20 hover:shadow-lg hover:shadow-violet-500/5 active:scale-[0.97] disabled:opacity-50"
+                            >
+                                {isHealing ? <Loader2 className="size-4 animate-spin" /> : <Wrench className="size-4" />}
+                                {isHealing ? "Диагностика..." : "🔧 Запустить диагностику + лечение"}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Status indicators */}
+                    <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3 text-center">
+                            <p className="text-lg font-bold text-emerald-400">{onlineCount}</p>
+                            <p className="text-[10px] text-zinc-500">Онлайн</p>
+                        </div>
+                        <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3 text-center">
+                            <p className="text-lg font-bold text-amber-400">{nodes.filter(n => n.status === "degraded").length}</p>
+                            <p className="text-[10px] text-zinc-500">Частично</p>
+                        </div>
+                        <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3 text-center">
+                            <p className="text-lg font-bold text-red-400">{nodes.filter(n => n.status === "offline").length}</p>
+                            <p className="text-[10px] text-zinc-500">Оффлайн</p>
+                        </div>
+                        <div className="rounded-lg border border-white/[0.06] bg-zinc-900/60 p-3 text-center">
+                            <p className="text-lg font-bold text-zinc-300">{totalCount}</p>
+                            <p className="text-[10px] text-zinc-500">Всего</p>
+                        </div>
+                    </div>
+
+                    {/* Heal Log */}
+                    {healLog && (
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+                            <div className="mb-3 flex items-center justify-between">
+                                <span className="text-xs font-bold text-zinc-300">📋 Результат последнего лечения:</span>
+                                <button
+                                    onClick={() => setHealLog(null)}
+                                    className="rounded-lg px-2.5 py-1 text-xs text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
+                                >✕ Скрыть</button>
+                            </div>
+                            <div className="space-y-2">
+                                {healLog.map((a, i) => (
+                                    <div key={i} className="flex items-start gap-2.5 text-sm">
+                                        {a.success
+                                            ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-400" />
+                                            : <XCircle className="mt-0.5 size-4 shrink-0 text-red-400" />
+                                        }
+                                        <span className={a.success ? "text-zinc-400" : "text-red-300"}>
+                                            <strong className="text-zinc-200">{a.service}:</strong> {a.descRu}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {!healLog && (
+                        <p className="text-center text-[11px] text-zinc-600">
+                            Нажмите кнопку выше для запуска полной диагностики всех сервисов и автоматического перезапуска упавших.
+                        </p>
+                    )}
+                </div>
+            </section>
+
+            {/* 🐕 Watchdog */}
+            <WatchdogWidget />
+
+            {/* 🔄 Пайплайн потока данных */}
+            <VoicePipelineViz />
         </div>
     );
 }

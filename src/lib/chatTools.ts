@@ -12,6 +12,7 @@ import { writeNoteToVault } from "@/lib/vaultWriter";
 import { webSearch } from "@/lib/webSearch";
 import type { ToolCall } from "@/lib/providers/base";
 import * as google from "@/lib/googleClient";
+import { TZ } from "@/lib/timezone";
 
 // ── Function calling tool definitions ────────────────────────
 
@@ -526,10 +527,10 @@ ${action}
                         });
                         const formatted = data.events.map((ev, i) => {
                             const start = ev.start.dateTime
-                                ? new Date(ev.start.dateTime).toLocaleString("ru-RU", { timeZone: "Asia/Bangkok", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })
+                                ? new Date(ev.start.dateTime).toLocaleString("ru-RU", { timeZone: "Asia/Barnaul", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })
                                 : ev.start.date || "весь день";
                             const end = ev.end.dateTime
-                                ? new Date(ev.end.dateTime).toLocaleString("ru-RU", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit" })
+                                ? new Date(ev.end.dateTime).toLocaleString("ru-RU", { timeZone: "Asia/Barnaul", hour: "2-digit", minute: "2-digit" })
                                 : "";
                             const attendees = ev.attendees?.map(a => a.displayName || a.email).join(", ") || "";
                             const location = ev.location ? ` 📍 ${ev.location}` : "";
@@ -545,8 +546,8 @@ ${action}
                             summary: String(args.summary ?? ""),
                             description: args.description as string,
                             location: args.location as string,
-                            start: allDay ? { date: startStr } : { dateTime: startStr, timeZone: "Asia/Bangkok" },
-                            end: allDay ? { date: endStr || startStr } : { dateTime: endStr || new Date(new Date(startStr).getTime() + 3600000).toISOString(), timeZone: "Asia/Bangkok" },
+                            start: allDay ? { date: startStr } : { dateTime: startStr, timeZone: "Asia/Barnaul" },
+                            end: allDay ? { date: endStr || startStr } : { dateTime: endStr || new Date(new Date(startStr).getTime() + 3600000).toISOString(), timeZone: "Asia/Barnaul" },
                             attendees: (args.attendees as string[])?.map(email => ({ email })),
                         });
                         executionResult = { success: true, id: created.id, summary: created.summary, link: created.htmlLink };
@@ -556,8 +557,8 @@ ${action}
                         if (args.summary) updates.summary = String(args.summary);
                         if (args.description) updates.description = String(args.description);
                         if (args.location) updates.location = String(args.location);
-                        if (args.start) updates.start = { dateTime: String(args.start), timeZone: "Asia/Bangkok" };
-                        if (args.end) updates.end = { dateTime: String(args.end), timeZone: "Asia/Bangkok" };
+                        if (args.start) updates.start = { dateTime: String(args.start), timeZone: "Asia/Barnaul" };
+                        if (args.end) updates.end = { dateTime: String(args.end), timeZone: "Asia/Barnaul" };
                         if (args.status) updates.status = String(args.status);
                         const updated = await google.calendarUpdateEvent(String(args.event_id ?? ""), updates);
                         executionResult = { success: true, id: updated.id, summary: updated.summary };

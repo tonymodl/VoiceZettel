@@ -286,8 +286,8 @@ export function useGeminiLiveSession() {
     }, []);
 
     /* ── Connect ── */
-    const connect = useCallback(
-        async (systemPrompt?: string, isReconnect = false) => {
+    const connect: (systemPrompt?: string, isReconnect?: boolean) => Promise<void> = useCallback(
+        async (systemPrompt?: string, isReconnect = false): Promise<void> => {
             // Save for reconnection (only on first connect, not reconnects)
             if (!isReconnect) {
                 lastSystemPromptRef.current = systemPrompt;
@@ -510,7 +510,7 @@ export function useGeminiLiveSession() {
                     );
 
                     reconnectTimerRef.current = setTimeout(() => {
-                        connect(lastSystemPromptRef.current, true /* isReconnect */).catch((err) => {
+                        connect(lastSystemPromptRef.current, true /* isReconnect */).catch((err: Error | unknown) => {
                             logger.error("[GeminiLive] Reconnect failed:", err);
                             if (retryCountRef.current >= MAX_RECONNECT_ATTEMPTS) {
                                 setIsReconnecting(false);
@@ -531,7 +531,8 @@ export function useGeminiLiveSession() {
                 }
             };
         },
-        [handleMessage, cleanupMic, triggerSessionAnalysis, connect],
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [handleMessage, cleanupMic, triggerSessionAnalysis],
     );
 
     /* ── Microphone capture ── */

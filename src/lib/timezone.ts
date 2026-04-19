@@ -7,7 +7,7 @@
  * consistent UTC+7 throughout the application.
  */
 
-const TZ = "Asia/Barnaul";
+export const TZ = "Asia/Barnaul";
 
 /**
  * Get current date/time formatted for the system prompt.
